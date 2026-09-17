@@ -16,11 +16,6 @@ export type ChatAttachment = {
   text?: string;
 };
 
-export type ChatInsertion = {
-  id: string;
-  text: string;
-};
-
 export type ChatMsg = {
   id: string;
   role: "user" | "assistant";

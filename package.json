@@ -8,7 +8,9 @@
   "description": "A local coding IDE with an autonomous agent",
   "scripts": {
     "dev": "next dev --turbopack --port 3100 --hostname 127.0.0.1",
+    "predev": "node scripts/sync-monaco.cjs",
     "build": "next build",
+    "prebuild": "node scripts/sync-monaco.cjs",
     "start": "next start --port 3100 --hostname 127.0.0.1",
     "desktop": "electron .",
     "desktop:prod": "electron . --prod",
@@ -16,6 +18,7 @@
     "harness": "dsh web --no-open",
     "harness:open": "dsh web",
     "icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icon.ps1",
+    "sync:monaco": "node scripts/sync-monaco.cjs",
     "dist": "npm run build && node scripts/prepare-standalone.cjs && npm run icon && electron-builder --win"
   },
   "dependencies": {
@@ -54,13 +57,19 @@
     "directories": {
       "output": "dist"
     },
+    "afterPack": "./scripts/after-pack.cjs",
     "files": [
-      "electron/**/*"
+      "electron/**/*",
+      "!**/node_modules/**"
     ],
     "extraResources": [
       {
         "from": ".next/standalone",
-        "to": "standalone"
+        "to": "standalone",
+        "filter": [
+          "**/*",
+          "!**/node_modules"
+        ]
       },
       {
         "from": "public",

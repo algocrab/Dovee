@@ -122,43 +122,31 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
   const messages = chat?.messages ?? [];
   const streaming = chat?.streaming ?? false;
   const hasKey = useIde((s) => s.settings?.hasApiKey);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Record<string, ChatAttachment[]>>({});
   const [dragging, setDragging] = useState(false);
-  const insertions = useIde((s) => s.chatInsertions);
-  const draft = drafts[activeChatId] ?? "";
+  const draft = useIde((s) => s.drafts[activeChatId] ?? "");
+  const focusToken = useIde((s) => s.composerFocusToken);
   const attachments = pending[activeChatId] ?? [];
   const scroller = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef(pending);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const focusComposer = useRef(false);
   const stickToBottom = useRef(true);
 
   useEffect(() => {
     pendingRef.current = pending;
   }, [pending]);
-  // Selections sent over with "Add to chat" land in the composer draft.
+  // "Add to chat" writes straight into the store draft and bumps composerFocusToken,
+  // so focus is requested here without stealing it on every keystroke.
+  const lastFocusToken = useRef(focusToken);
   useEffect(() => {
-    if (!insertions.length) return;
-    const queued = useIde.getState().consumeChatInsertions();
-    const added = queued.map((item) => item.text).filter(Boolean);
-    if (!added.length) return;
-    focusComposer.current = true;
-    setDrafts((d) => {
-      const existing = (d[activeChatId] ?? "").replace(/\s+$/, "");
-      return { ...d, [activeChatId]: existing ? `${existing}\n\n${added.join("\n\n")}` : added.join("\n\n") };
-    });
-  }, [insertions, activeChatId]);
-
-  useEffect(() => {
-    if (!focusComposer.current) return;
-    focusComposer.current = false;
+    if (focusToken === lastFocusToken.current) return;
+    lastFocusToken.current = focusToken;
     const el = textareaRef.current;
     if (!el) return;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
-  }, [drafts, activeChatId]);
+  }, [focusToken]);
 
 
   useEffect(() => {
@@ -183,7 +171,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
     const current = useIde.getState().chats.find((c) => c.id === chatId);
     const files = pendingRef.current[chatId] ?? [];
     if ((!text && files.length === 0) || !chatId || current?.streaming) return;
-    setDrafts((d) => ({ ...d, [chatId]: "" }));
+    useIde.getState().setDraft(chatId, "");
     setPending((p) => ({ ...p, [chatId]: [] }));
     const store = useIde.getState();
     store.addUserMessage(chatId, text, files);
@@ -200,17 +188,19 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
         history.push({ role: "user", content: userApiContent(m.content, m.attachments) });
         continue;
       }
+      const toolCalls = m.tools
+        .filter((t) => t.id && t.name)
+        .map((t) => ({
+          id: t.id,
+          type: "function" as const,
+          function: { name: t.name, arguments: t.arguments || "{}" },
+        }));
+      if (!m.content && toolCalls.length === 0) continue;
       history.push({
         role: "assistant",
-        content: m.content || null,
-        reasoning_content: m.thinking || null,
-        tool_calls: m.tools.length
-          ? m.tools.map((t) => ({
-              id: t.id,
-              type: "function",
-              function: { name: t.name, arguments: t.arguments },
-            }))
-          : undefined,
+        content: m.content || (toolCalls.length ? null : ""),
+        ...(m.thinking ? { reasoning_content: m.thinking } : {}),
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
       });
       for (const t of m.tools) {
         if (t.output === undefined) continue;
@@ -316,10 +306,8 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
     event.preventDefault();
     const pasted = event.clipboardData.getData("text/plain");
     if (pasted) {
-      setDrafts((d) => ({
-        ...d,
-        [activeChatId]: `${d[activeChatId] ?? ""}${pasted}`,
-      }));
+      const current = useIde.getState().drafts[activeChatId] ?? "";
+      useIde.getState().setDraft(activeChatId, `${current}${pasted}`);
     }
     void addFiles(files);
   }
@@ -409,7 +397,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
                 <button
                   key={hint}
                   type="button"
-                  onClick={() => setDrafts((d) => ({ ...d, [activeChatId]: hint }))}
+                  onClick={() => useIde.getState().setDraft(activeChatId, hint)}
                   className="rounded-lg border border-line bg-bg/40 px-3 py-2 text-left text-[12px] text-muted hover:border-teal/30 hover:bg-hover hover:text-text"
                 >
                   {hint}
@@ -481,7 +469,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
           )}
           <textarea
             value={draft}
-            onChange={(e) => setDrafts((d) => ({ ...d, [activeChatId]: e.target.value }))}
+            onChange={(e) => useIde.getState().setDraft(activeChatId, e.target.value)}
             onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {

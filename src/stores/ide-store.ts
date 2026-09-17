@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ThemeId } from "@/lib/theme";
-import type { AgentChat, ChatAttachment, ChatInsertion, ChatMsg, ToolCard } from "@/types/chat";
+import type { AgentChat, ChatAttachment, ChatMsg, ToolCard } from "@/types/chat";
 
 export type TreeEntry = { name: string; path: string; type: "file" | "dir" };
 
@@ -11,7 +11,7 @@ export type Tab = {
   language: string;
 };
 
-export type { AgentChat, ChatAttachment, ChatInsertion, ChatMsg, ToolCard };
+export type { AgentChat, ChatAttachment, ChatMsg, ToolCard };
 
 export type TermTab = {
   id: string;
@@ -23,6 +23,7 @@ export type PublicSettings = {
   model: string;
   reasoningEffort: "none" | "low" | "high" | "max";
   workspace: string;
+  hasFolder: boolean;
   baseUrl: string;
   hasApiKey: boolean;
   apiKeyHint: string;
@@ -81,7 +82,8 @@ type IdeState = {
   activeChatId: string;
   termTabs: TermTab[];
   activeTermId: string;
-  chatInsertions: ChatInsertion[];
+  drafts: Record<string, string>;
+  composerFocusToken: number;
   gitBranch: string;
   status: string;
   setSettings: (s: PublicSettings) => void;
@@ -113,7 +115,7 @@ type IdeState = {
   newChat: () => string;
   closeChat: (id: string) => void;
   addToChat: (text: string) => void;
-  consumeChatInsertions: () => ChatInsertion[];
+  setDraft: (chatId: string, text: string) => void;
   addUserMessage: (chatId: string, content: string, attachments?: ChatAttachment[]) => string;
   ensureAssistant: (chatId: string) => string;
   appendThinking: (chatId: string, text: string) => void;
@@ -153,7 +155,8 @@ export const useIde = create<IdeState>((set, get) => ({
   fileIndex: [],
   chats: [firstChat],
   activeChatId: firstChat.id,
-  chatInsertions: [],
+  drafts: {},
+  composerFocusToken: 0,
   termTabs: [firstTerm],
   activeTermId: firstTerm.id,
   gitBranch: "",
@@ -240,15 +243,15 @@ export const useIde = create<IdeState>((set, get) => ({
       return { chats, activeChatId };
     }),
   addToChat: (text) =>
-    set((s) => ({
-      chatInsertions: [...s.chatInsertions, { id: uid(), text }],
-      agentOpen: true,
-    })),
-  consumeChatInsertions: () => {
-    const insertions = get().chatInsertions;
-    if (insertions.length) set({ chatInsertions: [] });
-    return insertions;
-  },
+    set((s) => {
+      const existing = (s.drafts[s.activeChatId] ?? "").replace(/\s+$/, "");
+      return {
+        drafts: { ...s.drafts, [s.activeChatId]: existing ? `${existing}\n\n${text}` : text },
+        composerFocusToken: s.composerFocusToken + 1,
+        agentOpen: true,
+      };
+    }),
+  setDraft: (chatId, text) => set((s) => ({ drafts: { ...s.drafts, [chatId]: text } })),
   addUserMessage: (chatId, content, attachments) => {
     const id = uid();
     const titleSource = content.trim() || attachments?.[0]?.name || "New chat";

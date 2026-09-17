@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +14,7 @@ export type DoveeSettings = {
   model: string;
   reasoningEffort: ReasoningEffort;
   workspace: string;
+  desktopWorkspace?: string;
   baseUrl: string;
   theme: ThemeId;
   editorFontSize: number;
@@ -37,13 +39,69 @@ const ENV_KEYS: Record<string, string[]> = {
   custom: ["LLM_API_KEY"],
 };
 
+function envValue(name: string) {
+  return process.env[name];
+}
+
+function isPackagedApp() {
+  if (envValue("DOVEE_PACKAGED") === "1") return true;
+  if (existsSync(path.join(process.cwd(), ".dovee-desktop"))) return true;
+  return existsSync(path.join(os.homedir(), ".dovee", "packaged"));
+}
+
+function emptyUserWorkspace() {
+  return path.join(os.homedir(), "Dovee");
+}
+
+function isPlaceholderWorkspace(dir?: string) {
+  if (!dir?.trim()) return true;
+  return path.resolve(/* turbopackIgnore: true */ dir) === path.resolve(/* turbopackIgnore: true */ emptyUserWorkspace());
+}
+
+function defaultDevWorkspace() {
+  const cwd = process.cwd();
+  const norm = cwd.replace(/\\/g, "/").toLowerCase();
+  if (norm.endsWith("/resources/standalone") || norm.endsWith("/.next/standalone")) {
+    return emptyUserWorkspace();
+  }
+  return cwd;
+}
+
+async function isAppBundleWorkspace(dir: string) {
+  const abs = path.resolve(/* turbopackIgnore: true */ dir);
+  const norm = abs.replace(/\\/g, "/").toLowerCase();
+  if (norm.endsWith("/resources/standalone") || norm.endsWith("/.next/standalone")) return true;
+  if (path.basename(abs) !== "standalone") return false;
+  try {
+    const server = await fs.readFile(path.join(abs, "server.js"), "utf8");
+    return server.includes("next/dist/server/lib/start-server");
+  } catch {
+    return false;
+  }
+}
+
+async function sanitizeWorkspace(dir: string) {
+  const abs = path.resolve(/* turbopackIgnore: true */ dir);
+  if (await isAppBundleWorkspace(abs)) return emptyUserWorkspace();
+  return abs;
+}
+
+async function readStored(): Promise<Partial<DoveeSettings>> {
+  try {
+    const raw = await fs.readFile(SETTINGS_FILE, "utf8");
+    return JSON.parse(raw) as Partial<DoveeSettings>;
+  } catch {
+    return {};
+  }
+}
+
 const DEFAULTS: DoveeSettings = {
   apiKey: "",
   apiKeys: {},
   provider: "deepseek",
   model: "deepseek-flash",
   reasoningEffort: "high",
-  workspace: process.cwd(),
+  workspace: path.join(os.homedir(), "Dovee"),
   baseUrl: "https://api.deepseek.com",
   theme: "dark",
   editorFontSize: 15,
@@ -77,18 +135,21 @@ function asProvider(value: unknown): ProviderId {
 }
 
 export async function loadSettings(): Promise<DoveeSettings> {
-  let stored: Partial<DoveeSettings> = {};
-  try {
-    const raw = await fs.readFile(SETTINGS_FILE, "utf8");
-    stored = JSON.parse(raw) as Partial<DoveeSettings>;
-  } catch {
-    stored = {};
-  }
+  const stored = await readStored();
 
   const provider = asProvider(stored.provider);
   const preset = getProvider(provider);
   const apiKeys = stored.apiKeys ?? {};
   const apiKey = apiKeys[provider] || stored.apiKey || envKey(provider);
+  const packaged = isPackagedApp();
+  const envWorkspace = process.env.DOVEE_WORKSPACE?.trim();
+  const desktopMode = packaged || Boolean(envWorkspace);
+  const opened = stored.desktopWorkspace?.trim();
+  const hasOpened = Boolean(opened) && !isPlaceholderWorkspace(opened);
+  const chosen = desktopMode
+    ? (hasOpened && opened ? opened : envWorkspace || emptyUserWorkspace())
+    : envWorkspace || stored.workspace || defaultDevWorkspace();
+  const workspace = await sanitizeWorkspace(chosen);
 
   return {
     ...DEFAULTS,
@@ -98,7 +159,8 @@ export async function loadSettings(): Promise<DoveeSettings> {
     apiKey,
     model: stored.model || preset.models[0] || DEFAULTS.model,
     baseUrl: stored.baseUrl || preset.baseUrl || DEFAULTS.baseUrl,
-    workspace: stored.workspace || process.cwd(),
+    workspace,
+    desktopWorkspace: stored.desktopWorkspace,
     theme: stored.theme === "light" || stored.theme === "dusk" || stored.theme === "dark" ? stored.theme : DEFAULTS.theme,
     editorFontSize: typeof stored.editorFontSize === "number" ? stored.editorFontSize : DEFAULTS.editorFontSize,
     wordWrap: typeof stored.wordWrap === "boolean" ? stored.wordWrap : DEFAULTS.wordWrap,
@@ -108,6 +170,7 @@ export async function loadSettings(): Promise<DoveeSettings> {
 }
 
 export async function saveSettings(patch: Partial<DoveeSettings>) {
+  const stored = await readStored();
   const current = await loadSettings();
   const next: DoveeSettings = { ...current, ...patch };
   if (patch.apiKey !== undefined) {
@@ -117,8 +180,24 @@ export async function saveSettings(patch: Partial<DoveeSettings>) {
   if (patch.provider && patch.provider !== current.provider && patch.apiKey === undefined) {
     next.apiKey = next.apiKeys[patch.provider] || envKey(patch.provider);
   }
+
+  const packaged = isPackagedApp() || Boolean(process.env.DOVEE_WORKSPACE?.trim());
+  const fileOut: DoveeSettings = { ...next };
+  if (packaged) {
+    fileOut.desktopWorkspace = typeof patch.workspace === "string" ? next.workspace : stored.desktopWorkspace;
+    fileOut.workspace = typeof stored.workspace === "string" && stored.workspace.trim()
+      ? stored.workspace
+      : next.workspace;
+  } else {
+    fileOut.workspace = next.workspace;
+    fileOut.desktopWorkspace = stored.desktopWorkspace;
+  }
+  if (!fileOut.desktopWorkspace || isPlaceholderWorkspace(fileOut.desktopWorkspace)) {
+    delete fileOut.desktopWorkspace;
+  }
+
   await fs.mkdir(SETTINGS_DIR, { recursive: true });
-  await fs.writeFile(SETTINGS_FILE, JSON.stringify(next, null, 2), "utf8");
+  await fs.writeFile(SETTINGS_FILE, JSON.stringify(fileOut, null, 2), "utf8");
   return next;
 }
 
@@ -129,6 +208,9 @@ export function publicSettings(settings: DoveeSettings) {
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     workspace: settings.workspace,
+    hasFolder: isPackagedApp() || Boolean(process.env.DOVEE_WORKSPACE?.trim())
+      ? !isPlaceholderWorkspace(settings.desktopWorkspace)
+      : true,
     baseUrl: settings.baseUrl,
     hasApiKey: Boolean(key),
     apiKeyHint: key ? `••••${key.slice(-4)}` : "",

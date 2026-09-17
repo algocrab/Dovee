@@ -1,0 +1,93 @@
+📦 Jo already hai (feature inventory)
+Area	Features
+Shell/Layout	Menu bar (6 menus), activity bar, sidebar resizable, editor, bottom panel resizable, agent panel resizable, status bar, welcome screen
+Explorer	Tree, expand/collapse, new file, new folder, rename (inline), delete (confirm), right-click menu, copy path
+Editor	Monaco, tabs, dirty-state dots, 3 themes (dark/light/dusk), font size, word wrap, minimap, auto-save flag, path breadcrumbs, cursor position
+Chat/Agent	Multi-chat, persistence, streaming, thinking stream, tool cards, image/file attachments (drag, paste, picker), "Add to chat" from selection, abort, per-chat draft
+Search	Regex-or-text input, hit list
+Problems	tsc --noEmit diagnostics list
+Git	Status, log (50), commit, commit+push, push, pull, init, set remote, AI commit-message suggestion
+Terminal	Multi-tab, SSE streaming, restart, kill, 15s keepalive
+Command palette	Go-to-file + ~25 commands
+Desktop	Electron, custom frameless window, min/max/close, native folder picker, NSIS installer
+Settings	Provider (10), model, baseUrl, API key, workspace, theme, font, wrap, minimap, autoSave, reasoning effort
+🔴 P0 — Ye 2 cheezein core ko todti hain
+1. Monaco CDN se load hota hai → offline desktop app mein editor hi nahi khulega
+loader.config( ka poore project mein 0 match hai (src, electron, next.config — sab check kiya). Matlab @monaco-editor/react apne default path par chal raha hai, jo @monaco-editor/loader ke through jsDelivr CDN hai.
+
+Aap monaco-editor ko dependency mein rakhte hain, par use locally wire nahi kiya.
+Internet ke bina editor blank loading spinner par atak jayega.
+Aap ek .exe desktop IDE ship kar rahe hain — offline use iska whole point hai. Ye #1 blocker hai.
+Addon: loader.config({ monaco }) + local worker bundling. ~20 lines, sabse zyada impact.
+
+2. Terminal mein PTY nahi hai → half-broken terminal
+src/lib/shell.ts:39:
+
+spawn("powershell.exe", ["-NoLogo", "-NoExit"], { ... })   // pipes, no PTY
+node-pty package.json mein nahi hai (node_modules mein transitive mila, par use nahi hota).
+
+Kya todega: vim/nano/htop, interactive prompts, password input, npm login, git rebase -i, npx create-* ke questions, ANSI colors, terminal resize. xterm.js installed hai par usko feed karne ke liye proper PTY chahiye.
+
+Addon: node-pty + xterm over WebSocket.
+
+🟠 P1 — Daily use mein kha90tir rahega
+3. Editor mein IntelliSense nahi (no types, no LSP)
+monaco.languages.typescript.* ka koi config nahi, addExtraLib nahi. Matlab:
+
+node_modules/@types load nahi hote → dependencies ke liye autocomplete nahi, React hooks ka IntelliSense nahi, hover docs nahi, cross-dependency go-to-definition nahi
+Rename symbol, organize imports, code actions — kuch nahi
+Sirf formatOnPaste: true hai (monaco-pane.tsx:196)
+Monaco ka built-in TS service chalega, par wo tumhare project ke files tak seemit hai. Ye Cursor/VS Code se sabse bada practical farq hai.
+
+4. Git panel adhoora — staging aur diff bilkul nahi
+src/lib/git.ts mein sirf: gitStatus, gitLog, gitCommit, gitCommitAndPush, gitInit, gitPush, gitPull, gitSetRemote
+
+Missing: per-file stage/unstage, discard changes, branch create/switch, stash, diff viewer, merge conflict UI, fetch, blame, revert, tags.
+
+Panel sab kuch ek saath commit karta hai — literally title hai "All changes are included in the commit"
+stage|unstage|discard|stash|checkout|blame|diff → git-panel mein 0 matches. Koi diff view nahi hai.
+Diff viewer ke bina git panel daily use ke liye kaafi kamzor hai.
+
+5. File watcher nahi — sab stale reh jata hai
+chokidar install hai par use nahi hota, koi watcher nahi. Iska matlab:
+
+Agent ne file badli → editor stale
+Bahar se file change hui → IDE ko pata hi nahi
+Git status / tree auto-refresh nahi
+6. Search kamzor hai
+src/lib/tools.ts:237-241 — hamesha new RegExp(query, "i"), matlab case-sensitive search ka option hi nahi. Aur MAX_SEARCH_HITS = 80.
+
+Missing: case toggle, whole-word, include/exclude globs, replace / replace-all, per-file grouping + counts, pagination (80 ke baad results chup-chaap gayab). Search panel mein koi option UI nahi.
+
+7. Command palette mein fuzzy matching nahi
+command-palette.tsx → f.toLowerCase().includes(needle). Plain substring. srcid likhne par src/components/ide/... nahi milega — VS Code style subsequence matching nahi hai.
+
+8. Formatter nahi
+prettier installed nahi, format-on-save nahi. Code likha, format karne ka koi tareeka nahi (except paste).
+
+🟡 P2 — Power/quality features
+#	Missing	Evidence
+9	Split editor — single pane, side-by-side nahi	ide-shell.tsx mein ek <MonacoPane />
+10	Agent changes ka diff view — tool card + text output, koi visual diff nahi	diff.ts sirf patch apply karta hai
+11	Debugger — breakpoints, DAP	debugger → 0 matches
+12	Extensions/plugin API	extension, plugin → 0 matches
+13	Outline / symbols / go-to-symbol	outline|breadcrumb|symbol → sirf git ke --symbolic-full-name
+14	File ops adhoore — no move/drag-drop, duplicate, multi-select, reveal in OS	file-tree mein rename/delete/mkdir bas
+15	Multi-root workspace	single settings.workspace
+16	Chat: per-project scoping, search, export, fork	flat chats.json, MAX_CHATS = 40
+17	Cost/token display	usage event aata hai, ChatMsg mein store nahi hota
+18	Test runner integration	npm test nahi, vitest/jest nahi
+19	Settings: keybindings editor, ignore/exclude patterns, proxy, font family	settings-modal mein ye sab nahi
+🔴 Security (dobara flag kar raha hoon)
+Aapki API keys ~/.dovee/settings.json mein plaintext hain. Design theek hai (renderer ko sirf hasApiKey/apiKeyHint milta hai), par disk par plaintext rehna risk hai. Electron safeStorage ya OS keychain better hoga.
+
+(Jaisa pichhle turn mein bataya — verification ke waqt ye keys tool output mein aa gayi thi, rotate kar lein.)
+
+🎯 Mera recommended order
+Sprint 1 (core ko theek karo):
+
+Monaco local bundling (offline fix) — P0
+node-pty terminal — P0
+Sprint 2 (daily driver banao): 3. Git diff viewer + per-file staging 4. File watcher (tree/tabs/git auto-refresh) 5. Search options (case, globs, replace) 6. Formatter + format-on-save
+
+Sprint 3 (polish): 7. Command palette fuzzy matching 8. Agent change diff view 9. Editor IntelliSense for deps (addExtraLib)

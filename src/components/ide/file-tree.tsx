@@ -4,7 +4,8 @@ import { ChevronRight, Folder, FolderOpen, Pencil, Plus, RefreshCw, Trash2 } fro
 import { useState, type MouseEvent } from "react";
 import { cn } from "@/lib/cn";
 import { useIde, type TreeEntry } from "@/stores/ide-store";
-import { IconButton, PanelHeading } from "./chrome";
+import { openFolder } from "./actions";
+import { IconButton, Kbd, PanelHeading } from "./chrome";
 import { FileGlyph } from "./file-icon";
 
 async function loadTree(path = ".") {
@@ -139,9 +140,57 @@ function Node({
   );
 }
 
+function ExplorerEmpty({
+  hasFolder,
+  onNewFile,
+}: {
+  hasFolder: boolean;
+  onNewFile: () => void;
+}) {
+  if (!hasFolder) {
+    return (
+      <div className="px-3 py-4">
+        <p className="text-[13px] font-medium">No folder opened</p>
+        <p className="mt-1 text-[12px] leading-relaxed text-muted">
+          Open a folder to browse and edit files.
+        </p>
+        <button
+          type="button"
+          onClick={() => void openFolder()}
+          className="mt-3 w-full rounded-lg bg-teal/15 px-3 py-1.5 text-[13px] text-teal hover:bg-teal/25"
+        >
+          Open Folder
+        </button>
+        <p className="mt-2.5 flex items-center gap-1 text-[11px] text-muted">
+          <Kbd>Ctrl+K</Kbd>
+          <span>then</span>
+          <Kbd>O</Kbd>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 py-4">
+      <p className="text-[13px] font-medium">This folder is empty</p>
+      <p className="mt-1 text-[12px] leading-relaxed text-muted">
+        Create a file to get started.
+      </p>
+      <button
+        type="button"
+        onClick={onNewFile}
+        className="mt-3 w-full rounded-lg border border-line bg-bg-2 px-3 py-1.5 text-[13px] hover:bg-hover"
+      >
+        New file
+      </button>
+    </div>
+  );
+}
+
 export function FileTree() {
   const tree = useIde((s) => s.tree);
   const workspace = useIde((s) => s.settings?.workspace);
+  const hasFolder = useIde((s) => s.settings?.hasFolder) ?? tree.length > 0;
   const [creating, setCreating] = useState<"file" | "dir" | null>(null);
   const [name, setName] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; entry: TreeEntry } | null>(null);
@@ -184,19 +233,21 @@ export function FileTree() {
     <div className="flex h-full flex-col" onClick={() => setMenu(null)}>
       <PanelHeading
         kicker="Explorer"
-        title={workspace?.split(/[/\\]/).pop()}
+        title={hasFolder && tree.length > 0 ? workspace?.split(/[/\\]/).pop() : undefined}
         actions={
-          <>
-            <IconButton title="New file" onClick={() => setCreating("file")}>
-              <Plus className="h-4 w-4" />
-            </IconButton>
-            <IconButton title="New folder" onClick={() => setCreating("dir")}>
-              <Folder className="h-4 w-4" />
-            </IconButton>
-            <IconButton title="Refresh" onClick={() => void refreshRoot()}>
-              <RefreshCw className="h-4 w-4" />
-            </IconButton>
-          </>
+          hasFolder ? (
+            <>
+              <IconButton title="New file" onClick={() => setCreating("file")}>
+                <Plus className="h-4 w-4" />
+              </IconButton>
+              <IconButton title="New folder" onClick={() => setCreating("dir")}>
+                <Folder className="h-4 w-4" />
+              </IconButton>
+              <IconButton title="Refresh" onClick={() => void refreshRoot()}>
+                <RefreshCw className="h-4 w-4" />
+              </IconButton>
+            </>
+          ) : undefined
         }
       />
       {creating && (
@@ -220,14 +271,18 @@ export function FileTree() {
         </form>
       )}
       <div className="min-h-0 flex-1 overflow-auto px-1 pb-3">
-        {tree.map((entry) => (
-          <Node
-            key={entry.path}
-            entry={entry}
-            depth={0}
-            onContext={(e, item) => setMenu({ x: e.clientX, y: e.clientY, entry: item })}
-          />
-        ))}
+        {tree.length === 0 && !creating ? (
+          <ExplorerEmpty hasFolder={hasFolder} onNewFile={() => setCreating("file")} />
+        ) : (
+          tree.map((entry) => (
+            <Node
+              key={entry.path}
+              entry={entry}
+              depth={0}
+              onContext={(e, item) => setMenu({ x: e.clientX, y: e.clientY, entry: item })}
+            />
+          ))
+        )}
       </div>
       {menu && (
         <div

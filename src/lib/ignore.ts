@@ -12,6 +12,7 @@ export const IGNORE_DIRS = new Set([
   ".venv",
   "venv",
   ".dovee",
+  ".dovee-desktop",
   ".idea",
   ".vscode",
   ".cursor",

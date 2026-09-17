@@ -1,11 +1,15 @@
 "use client";
 
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor, { loader, type OnMount } from "@monaco-editor/react";
 import { useEffect, useRef, useState } from "react";
 import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
 import { AddToChatButton, type ChatSpot } from "./add-to-chat";
 import { EditorWelcome } from "./chrome";
+
+// Serve Monaco from our own bundle instead of the jsDelivr CDN the loader defaults to,
+// so the editor also works offline. scripts/sync-monaco.cjs populates public/monaco.
+loader.config({ paths: { vs: "/monaco/vs" } });
 
 function appearanceOptions(fontSize: number, wordWrap: boolean, minimap: boolean) {
   return {
@@ -96,7 +100,11 @@ export function MonacoPane() {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const pathRef = useRef<string | null>(tab?.path ?? null);
   const [spot, setSpot] = useState<ChatSpot | null>(null);
-  pathRef.current = tab?.path ?? null;
+
+  // The editor's selection callbacks run outside React, so the path is kept in a ref.
+  useEffect(() => {
+    pathRef.current = tab?.path ?? null;
+  }, [tab?.path]);
 
   useEffect(() => {
     monacoRef.current?.editor.setTheme(MONACO_THEME[theme]);
@@ -107,10 +115,6 @@ export function MonacoPane() {
     if (!editor) return;
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
   }, [fontSize, wordWrap, minimap]);
-
-  useEffect(() => {
-    setSpot(null);
-  }, [tab?.path]);
 
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -163,6 +167,7 @@ export function MonacoPane() {
     });
     editor.onDidDispose(() => {
       if (editorRef.current === editor) editorRef.current = null;
+      // The Editor is keyed by path, so a tab switch disposes it and clears the popup here.
       setSpot(null);
     });
   };

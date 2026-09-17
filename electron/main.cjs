@@ -1,9 +1,11 @@
 "use strict";
 
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
+const net = require("net");
+const os = require("os");
 const path = require("path");
 
 const HOST = "127.0.0.1";
@@ -50,22 +52,25 @@ function ping() {
   });
 }
 
-function getAvailablePort(preferred) {
-  return new Promise((resolve) => {
-    const tryListen = (port) => {
-      const server = http.createServer();
-      server.once("error", () => {
-        if (port !== 0) tryListen(0);
-        else resolve(preferred);
-      });
-      server.listen(port, HOST, () => {
-        const address = server.address();
-        const assigned = typeof address === "object" && address ? address.port : preferred;
-        server.close(() => resolve(assigned));
-      });
-    };
-    tryListen(preferred);
+function listenPort(port) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen(port, HOST, () => {
+      const address = server.address();
+      const assigned = typeof address === "object" && address ? address.port : port;
+      server.close(() => resolve(assigned));
+    });
   });
+}
+
+async function getAvailablePort(preferred) {
+  try {
+    return await listenPort(preferred);
+  } catch {
+    return listenPort(0);
+  }
 }
 
 async function waitForNext(timeoutMs = 120000) {
@@ -77,24 +82,81 @@ async function waitForNext(timeoutMs = 120000) {
   return false;
 }
 
+function packagedFlagFile() {
+  return path.join(os.homedir(), ".dovee", "packaged");
+}
+
+function setPackagedFlag() {
+  try {
+    fs.mkdirSync(path.dirname(packagedFlagFile()), { recursive: true });
+    fs.writeFileSync(packagedFlagFile(), String(process.pid));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearPackagedFlag() {
+  try {
+    fs.unlinkSync(packagedFlagFile());
+  } catch {
+    /* ignore */
+  }
+}
+
+function writeLog(message) {
+  const line = `[${new Date().toISOString()}] ${message}\n`;
+  const files = [path.join(os.tmpdir(), "dovee.log")];
+  try {
+    files.unshift(path.join(app.getPath("userData"), "dovee.log"));
+  } catch {
+    /* app path not ready */
+  }
+  for (const file of files) {
+    try {
+      fs.appendFileSync(file, line);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function startStandalone() {
   const root = standaloneRoot();
   const serverJs = path.join(root, "server.js");
+  const nextPkg = path.join(root, "node_modules", "next", "package.json");
+  if (!fs.existsSync(serverJs)) {
+    throw new Error(`Missing server: ${serverJs}`);
+  }
+  if (!fs.existsSync(nextPkg)) {
+    throw new Error(`Missing Next.js runtime: ${nextPkg}`);
+  }
+
   const env = {
     ...process.env,
     PORT: String(PORT),
     HOSTNAME: HOST,
-    ELECTRON_RUN_AS_NODE: "1",
+    NODE_ENV: "production",
+    NODE_PATH: path.join(root, "node_modules"),
   };
-  nextProcess = spawn(process.execPath, [serverJs], {
+  if (app.isPackaged) {
+    env.DOVEE_PACKAGED = "1";
+    env.DOVEE_WORKSPACE = path.join(os.homedir(), "Dovee");
+  }
+  delete env.ELECTRON_RUN_AS_NODE;
+
+  nextProcess = utilityProcess.fork(serverJs, [], {
     cwd: root,
     env,
-    stdio: "inherit",
-    windowsHide: true,
+    stdio: "pipe",
+    serviceName: "dovee-next",
   });
   startedNext = true;
-  nextProcess.on("error", (err) => {
-    console.error("Failed to start Dovee server:", err);
+  writeLog(`Started server ${serverJs} on ${HOST}:${PORT}`);
+  nextProcess.stdout?.on("data", (chunk) => writeLog(String(chunk).trimEnd()));
+  nextProcess.stderr?.on("data", (chunk) => writeLog(String(chunk).trimEnd()));
+  nextProcess.on("exit", (code) => {
+    startedNext = false;
+    writeLog(`Server exited with code ${code}`);
   });
 }
 
@@ -127,14 +189,16 @@ function stopNext() {
   const child = nextProcess;
   nextProcess = null;
   startedNext = false;
-  if (process.platform === "win32" && child.pid) {
-    spawn("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    return;
+  try {
+    child.kill();
+  } catch {
+    if (process.platform === "win32" && child.pid) {
+      spawn("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    }
   }
-  child.kill("SIGTERM");
 }
 
 function logoMarkup() {
@@ -202,7 +266,7 @@ function createWindow() {
   });
 
   win.setMenuBarVisibility(false);
-  win.once("ready-to-show", () => win.show());
+  win.show();
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -269,24 +333,38 @@ if (!gotLock) {
       app.dock.setIcon(ICON_PATH);
     }
 
+    writeLog(`ready packaged=${app.isPackaged} standalone=${standaloneRoot()}`);
+    if (app.isPackaged) setPackagedFlag();
     const win = createWindow();
-    await loadHtml(win, "Starting Dovee…");
+    void loadHtml(win, "Starting Dovee…");
 
-    if (app.isPackaged) {
-      PORT = await getAvailablePort(PORT);
-      startNext();
-    } else {
-      const alreadyUp = await ping();
-      if (!alreadyUp) startNext();
+    try {
+      const serverJs = path.join(standaloneRoot(), "server.js");
+      writeLog(`server.js exists=${fs.existsSync(serverJs)}`);
+      if (app.isPackaged || (!isDev() && fs.existsSync(serverJs))) {
+        PORT = await getAvailablePort(PORT);
+        writeLog(`using port ${PORT}`);
+        startNext();
+      } else {
+        const alreadyUp = await ping();
+        if (!alreadyUp) startNext();
+      }
+
+      const ready = await waitForNext();
+      if (!ready) {
+        const logFile = path.join(app.getPath("userData"), "dovee.log");
+        writeLog(`timeout waiting for ${appUrl()}`);
+        await loadHtml(win, `Could not start Dovee on ${appUrl()}. See ${logFile}`, "#e07a7a");
+        return;
+      }
+
+      writeLog(`loading ${appUrl()}`);
+      await win.loadURL(appUrl());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      writeLog(message);
+      await loadHtml(win, message, "#e07a7a");
     }
-
-    const ready = await waitForNext();
-    if (!ready) {
-      await loadHtml(win, `Could not start Dovee on ${appUrl()}.`, "#e07a7a");
-      return;
-    }
-
-    await win.loadURL(appUrl());
   });
 
   app.on("activate", () => {
@@ -301,6 +379,7 @@ if (!gotLock) {
   });
 
   app.on("before-quit", () => {
+    clearPackagedFlag();
     stopNext();
   });
 }

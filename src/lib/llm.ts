@@ -44,6 +44,57 @@ function chatUrl(baseUrl: string) {
   return base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
 }
 
+function hasMessageContent(content: ChatMessage["content"]) {
+  if (content == null) return false;
+  if (typeof content === "string") return content.length > 0;
+  return Array.isArray(content) && content.length > 0;
+}
+
+function sanitizeOpenAiMessages(messages: ChatMessage[]): ChatMessage[] {
+  const prepared: ChatMessage[] = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      prepared.push({ ...message, content: message.content ?? "" });
+      continue;
+    }
+    const toolCalls = (message.tool_calls ?? []).filter((call) => call?.id && call.function?.name);
+    // DeepSeek rejects assistant turns that have neither content nor tool_calls
+    // (thinking-only / empty placeholders). Drop them instead of sending content: "".
+    if (!hasMessageContent(message.content) && toolCalls.length === 0) {
+      continue;
+    }
+    const next: ChatMessage = { role: "assistant" };
+    if (message.reasoning_content) next.reasoning_content = message.reasoning_content;
+    if (toolCalls.length) {
+      next.tool_calls = toolCalls;
+      next.content = hasMessageContent(message.content) ? message.content : null;
+    } else {
+      next.content = message.content;
+    }
+    prepared.push(next);
+  }
+
+  const validToolIds = new Set<string>();
+  const out: ChatMessage[] = [];
+  for (const message of prepared) {
+    if (message.role === "assistant") {
+      validToolIds.clear();
+      for (const call of message.tool_calls ?? []) validToolIds.add(call.id);
+      out.push(message);
+      continue;
+    }
+    if (message.role === "tool") {
+      if (message.tool_call_id && validToolIds.has(message.tool_call_id)) {
+        out.push({ ...message, content: message.content ?? "" });
+      }
+      continue;
+    }
+    validToolIds.clear();
+    out.push(message);
+  }
+  return out;
+}
+
 function extraHeaders(provider: ProviderId, apiKey: string): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (provider === "anthropic") {
@@ -317,10 +368,11 @@ export async function* streamChat(options: {
   }
 
   const thinkingEnabled = provider.id === "deepseek" && options.settings.reasoningEffort !== "none";
+  const sanitized = sanitizeOpenAiMessages(options.messages);
   const messages =
     provider.id === "deepseek"
-      ? options.messages
-      : options.messages.map((m) => {
+      ? sanitized
+      : sanitized.map((m) => {
           const copy = { ...m };
           delete copy.reasoning_content;
           return copy;

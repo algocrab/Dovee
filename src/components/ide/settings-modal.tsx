@@ -50,12 +50,8 @@ function SettingsForm({
 
   async function save() {
     applyTheme(theme);
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const payload: Record<string, unknown> = {
         apiKey: apiKey || undefined,
-        workspace,
         provider,
         model,
         baseUrl,
@@ -65,7 +61,14 @@ function SettingsForm({
         wordWrap,
         minimap,
         autoSave,
-      }),
+      };
+    if (workspace.trim() && workspace.trim() !== (settings?.workspace ?? "")) {
+      payload.workspace = workspace.trim();
+    }
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     useIde.getState().setSettings(data);

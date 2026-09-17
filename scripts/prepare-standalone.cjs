@@ -34,4 +34,25 @@ if (fs.existsSync(picker)) {
   fs.copyFileSync(picker, path.join(scriptsDest, "pick-folder.ps1"));
 }
 
+if (!fs.existsSync(path.join(standalone, "node_modules", "next", "package.json"))) {
+  console.error("Missing .next/standalone/node_modules/next.");
+  process.exit(1);
+}
+
+let serverSource = fs.readFileSync(serverJs, "utf8");
+if (!serverSource.includes("nextConfig.outputFileTracingRoot = dir")) {
+  serverSource = serverSource.replace(
+    "process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig)",
+    [
+      "nextConfig.outputFileTracingRoot = dir",
+      "nextConfig.repoRoot = dir",
+      "if (nextConfig.turbopack) nextConfig.turbopack.root = dir",
+      "process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig)",
+    ].join("\n"),
+  );
+  fs.writeFileSync(serverJs, serverSource);
+}
+
+  fs.writeFileSync(path.join(standalone, ".dovee-desktop"), "1");
+
 console.log("Standalone runtime files copied.");

@@ -316,7 +316,7 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
           const npx = process.platform === "win32" ? "npx.cmd" : "npx";
           const { stdout, stderr } = await execFileAsync(
             npx,
-            ["--no-install", "tsc", "--noEmit", "--pretty", "false", "-p", tsconfig],
+            ["--no-install", "tsc", "--noEmit", "--pretty", "false", "-p", "tsconfig.json"],
             { cwd: root, timeout: 120_000, windowsHide: true, shell: process.platform === "win32" },
           );
           const text = `${stdout}\n${stderr}`.trim();

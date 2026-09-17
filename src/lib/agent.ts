@@ -88,11 +88,11 @@ export async function* runAgent(
 
     const assistant: ChatMessage = {
       role: "assistant",
-      content: content || null,
-      reasoning_content: reasoning || null,
-      tool_calls: toolCalls,
+      content: content || (toolCalls?.length ? null : ""),
+      tool_calls: toolCalls?.length ? toolCalls : undefined,
     };
-    messages.push(assistant);
+    if (reasoning) assistant.reasoning_content = reasoning;
+    if (content || toolCalls?.length) messages.push(assistant);
 
     if (!toolCalls?.length || finish === "stop") {
       yield { type: "done", usage };
