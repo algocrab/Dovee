@@ -1,10 +1,11 @@
 "use client";
 
-import { GitBranch, History, Link2, RefreshCw, Upload } from "lucide-react";
+import { GitBranch, Link2, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import type { GitCommit, GitStatus } from "@/types/git";
 import { useIde } from "@/stores/ide-store";
+import { IconButton, PanelHeading } from "./chrome";
 import { openFile } from "./file-tree";
 
 export function GitPanel() {
@@ -172,14 +173,14 @@ export function GitPanel() {
             <button
               type="button"
               onClick={() => setTab("changes")}
-              className={cn("rounded px-2 py-1 text-[11px]", tab === "changes" ? "bg-white/10 text-text" : "text-muted")}
+              className={cn("rounded px-2 py-1 text-[11px]", tab === "changes" ? "bg-hover text-text" : "text-muted")}
             >
               Changes{status.files.length ? ` (${status.files.length})` : ""}
             </button>
             <button
               type="button"
               onClick={() => setTab("history")}
-              className={cn("rounded px-2 py-1 text-[11px]", tab === "history" ? "bg-white/10 text-text" : "text-muted")}
+              className={cn("rounded px-2 py-1 text-[11px]", tab === "history" ? "bg-hover text-text" : "text-muted")}
             >
               History
             </button>
@@ -200,7 +201,7 @@ export function GitPanel() {
                     key={file.path}
                     type="button"
                     onClick={() => void openFile(file.path)}
-                    className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-white/5"
+                    className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-hover"
                   >
                     <span className="w-14 shrink-0 font-mono text-[10px] uppercase text-gold">{file.label}</span>
                     <span className="min-w-0 truncate font-mono text-[11px]">{file.path}</span>
@@ -292,17 +293,14 @@ export function GitPanel() {
 
 function Header({ onRefresh }: { onRefresh: () => void }) {
   return (
-    <div className="flex items-center justify-between px-3 py-2">
-      <div>
-        <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted">Source control</div>
-        <div className="flex items-center gap-1 text-[11px] text-teal/80">
-          <History className="h-3 w-3" />
-          Git
-        </div>
-      </div>
-      <button type="button" onClick={onRefresh} className="rounded p-1 text-muted hover:bg-white/5 hover:text-text" title="Refresh">
-        <RefreshCw className="h-3.5 w-3.5" />
-      </button>
-    </div>
+    <PanelHeading
+      kicker="Source control"
+      title="Git"
+      actions={
+        <IconButton title="Refresh" onClick={onRefresh}>
+          <RefreshCw className="h-3.5 w-3.5" />
+        </IconButton>
+      }
+    />
   );
 }

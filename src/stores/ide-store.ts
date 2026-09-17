@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ThemeId } from "@/lib/theme";
 
 export type TreeEntry = { name: string; path: string; type: "file" | "dir" };
 
@@ -39,12 +40,27 @@ export type TermTab = {
 };
 
 export type PublicSettings = {
-  model: "deepseek-flash" | "deepseek-v4-pro";
+  provider: string;
+  model: string;
   reasoningEffort: "none" | "low" | "high" | "max";
   workspace: string;
   baseUrl: string;
   hasApiKey: boolean;
   apiKeyHint: string;
+  theme: ThemeId;
+  editorFontSize: number;
+  wordWrap: boolean;
+  minimap: boolean;
+  autoSave: boolean;
+};
+
+export type Problem = {
+  path: string;
+  line: number;
+  column: number;
+  severity: "error" | "warning";
+  code: string;
+  message: string;
 };
 
 type SearchHit = { path: string; line: number; text: string };
@@ -75,6 +91,10 @@ type IdeState = {
   agentWidth: number;
   settingsOpen: boolean;
   commandOpen: boolean;
+  commandMode: "files" | "commands";
+  sidebarWidth: number;
+  bottomTab: "terminal" | "problems";
+  problems: Problem[];
   searchQuery: string;
   searchHits: SearchHit[];
   fileIndex: string[];
@@ -94,7 +114,11 @@ type IdeState = {
   setTerminalHeight: (n: number) => void;
   setAgentWidth: (n: number) => void;
   setSettingsOpen: (v: boolean) => void;
-  setCommandOpen: (v: boolean) => void;
+  setCommandOpen: (v: boolean, mode?: "files" | "commands") => void;
+  setSidebarWidth: (n: number) => void;
+  setBottomTab: (t: "terminal" | "problems") => void;
+  setProblems: (p: Problem[]) => void;
+  patchAppearance: (p: Partial<Pick<PublicSettings, "theme" | "editorFontSize" | "wordWrap" | "minimap" | "autoSave">>) => void;
   setSearch: (q: string, hits: SearchHit[]) => void;
   setFileIndex: (files: string[]) => void;
   setGitBranch: (branch: string) => void;
@@ -132,11 +156,15 @@ export const useIde = create<IdeState>((set, get) => ({
   cursor: { line: 1, column: 1 },
   leftTab: "explorer",
   agentOpen: true,
-  terminalOpen: true,
+  terminalOpen: false,
   terminalHeight: 220,
   agentWidth: 380,
   settingsOpen: false,
   commandOpen: false,
+  commandMode: "files",
+  sidebarWidth: 280,
+  bottomTab: "terminal",
+  problems: [],
   searchQuery: "",
   searchHits: [],
   fileIndex: [],
@@ -157,7 +185,14 @@ export const useIde = create<IdeState>((set, get) => ({
   setTerminalHeight: (terminalHeight) => set({ terminalHeight }),
   setAgentWidth: (agentWidth) => set({ agentWidth }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
-  setCommandOpen: (commandOpen) => set({ commandOpen }),
+  setCommandOpen: (commandOpen, commandMode = "files") => set({ commandOpen, commandMode }),
+  setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
+  setBottomTab: (bottomTab) => set({ bottomTab, terminalOpen: true }),
+  setProblems: (problems) => set({ problems }),
+  patchAppearance: (p) =>
+    set((s) => ({
+      settings: s.settings ? { ...s.settings, ...p } : s.settings,
+    })),
   setSearch: (searchQuery, searchHits) => set({ searchQuery, searchHits }),
   setFileIndex: (fileIndex) => set({ fileIndex }),
   setGitBranch: (gitBranch) => set({ gitBranch }),
@@ -296,6 +331,7 @@ export const useIde = create<IdeState>((set, get) => ({
       termTabs: [...s.termTabs, { id, name: `powershell ${n}` }],
       activeTermId: id,
       terminalOpen: true,
+      bottomTab: "terminal",
     }));
     return id;
   },

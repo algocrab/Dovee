@@ -1,9 +1,10 @@
 "use client";
 
-import { ChevronRight, File, Folder, FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { cn } from "@/lib/cn";
 import { useIde, type TreeEntry } from "@/stores/ide-store";
+import { FileGlyph, IconButton, PanelHeading } from "./chrome";
 
 async function loadTree(path = ".") {
   const res = await fetch(`/api/files/tree?path=${encodeURIComponent(path)}`);
@@ -31,11 +32,21 @@ export async function openFile(path: string) {
   });
 }
 
-function Node({ entry, depth }: { entry: TreeEntry; depth: number }) {
+function Node({
+  entry,
+  depth,
+  onContext,
+}: {
+  entry: TreeEntry;
+  depth: number;
+  onContext: (e: MouseEvent, entry: TreeEntry) => void;
+}) {
   const expanded = useIde((s) => s.expanded[entry.path]);
   const activePath = useIde((s) => s.activePath);
   const isDir = entry.type === "dir";
   const open = Array.isArray(expanded);
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(entry.name);
 
   async function toggle() {
     if (!isDir) {
@@ -52,46 +63,77 @@ function Node({ entry, depth }: { entry: TreeEntry; depth: number }) {
     useIde.getState().setExpanded(entry.path, entries);
   }
 
-  async function remove(e: MouseEvent) {
-    e.stopPropagation();
-    if (!confirm(`Delete ${entry.path}?`)) return;
-    await fetch("/api/files/delete", {
+  async function rename() {
+    setRenaming(false);
+    const next = entry.path.includes("/")
+      ? `${entry.path.slice(0, entry.path.lastIndexOf("/"))}/${name}`
+      : name;
+    if (!name.trim() || next === entry.path) return;
+    await fetch("/api/files/rename", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: entry.path }),
+      body: JSON.stringify({ from: entry.path, to: next }),
     });
-    useIde.getState().closeTab(entry.path);
+    const tab = useIde.getState().tabs.find((t) => t.path === entry.path);
+    if (tab) {
+      useIde.getState().closeTab(entry.path);
+      await openFile(next);
+    }
     await refreshRoot();
   }
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={toggle}
+      <div
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onContext(e, entry);
+        }}
         className={cn(
-          "group flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[12.5px] hover:bg-white/5",
+          "group flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-left text-[14px] hover:bg-hover",
           activePath === entry.path && "bg-teal/10 text-teal",
         )}
-        style={{ paddingLeft: 6 + depth * 12 }}
+        style={{ paddingLeft: 6 + depth * 14 }}
       >
-        {isDir ? (
-          <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted transition", open && "rotate-90")} />
-        ) : (
-          <span className="w-3" />
-        )}
-        {isDir ? (
-          open ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-gold/80" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-gold/70" />
-        ) : (
-          <File className="h-3.5 w-3.5 shrink-0 text-muted" />
-        )}
-        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-        <Trash2
-          className="h-3 w-3 shrink-0 text-muted opacity-0 hover:text-rose group-hover:opacity-100"
-          onClick={remove}
+        <button type="button" onClick={() => void toggle()} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+          {isDir ? (
+            <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted transition", open && "rotate-90")} />
+          ) : (
+            <span className="w-3.5" />
+          )}
+          {isDir ? (
+            open ? <FolderOpen className="h-4 w-4 shrink-0 text-gold/80" /> : <Folder className="h-4 w-4 shrink-0 text-gold/70" />
+          ) : (
+            <FileGlyph name={entry.name} />
+          )}
+          {renaming ? (
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={() => void rename()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void rename();
+                if (e.key === "Escape") setRenaming(false);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="min-w-0 flex-1 rounded border border-line bg-bg px-1 py-0.5 font-mono text-[13px] outline-none"
+            />
+          ) : (
+            <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+          )}
+        </button>
+        <Pencil
+          className="h-3.5 w-3.5 shrink-0 text-muted opacity-0 hover:text-text group-hover:opacity-100"
+          onClick={(e) => {
+            e.stopPropagation();
+            setRenaming(true);
+          }}
         />
-      </button>
-      {isDir && open && expanded?.map((child) => <Node key={child.path} entry={child} depth={depth + 1} />)}
+      </div>
+      {isDir && open && expanded?.map((child) => (
+        <Node key={child.path} entry={child} depth={depth + 1} onContext={onContext} />
+      ))}
     </div>
   );
 }
@@ -101,6 +143,7 @@ export function FileTree() {
   const workspace = useIde((s) => s.settings?.workspace);
   const [creating, setCreating] = useState<"file" | "dir" | null>(null);
   const [name, setName] = useState("");
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: TreeEntry } | null>(null);
 
   async function create() {
     if (!creating || !name.trim()) return;
@@ -124,27 +167,37 @@ export function FileTree() {
     await refreshRoot();
   }
 
+  async function remove(entry: TreeEntry) {
+    if (!confirm(`Delete ${entry.path}?`)) return;
+    await fetch("/api/files/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: entry.path }),
+    });
+    useIde.getState().closeTab(entry.path);
+    setMenu(null);
+    await refreshRoot();
+  }
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-3 py-2">
-        <div className="min-w-0">
-          <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted">Explorer</div>
-          <div className="truncate font-mono text-[11px] text-teal/80" title={workspace}>
-            {workspace?.split(/[/\\]/).pop()}
-          </div>
-        </div>
-        <div className="flex gap-1">
-          <button type="button" className="rounded p-1 text-muted hover:bg-white/5 hover:text-text" onClick={() => setCreating("file")} title="New file">
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" className="rounded p-1 text-muted hover:bg-white/5 hover:text-text" onClick={() => setCreating("dir")} title="New folder">
-            <Folder className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" className="rounded p-1 text-muted hover:bg-white/5 hover:text-text" onClick={() => refreshRoot()} title="Refresh">
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
+    <div className="flex h-full flex-col" onClick={() => setMenu(null)}>
+      <PanelHeading
+        kicker="Explorer"
+        title={workspace?.split(/[/\\]/).pop()}
+        actions={
+          <>
+            <IconButton title="New file" onClick={() => setCreating("file")}>
+              <Plus className="h-4 w-4" />
+            </IconButton>
+            <IconButton title="New folder" onClick={() => setCreating("dir")}>
+              <Folder className="h-4 w-4" />
+            </IconButton>
+            <IconButton title="Refresh" onClick={() => void refreshRoot()}>
+              <RefreshCw className="h-4 w-4" />
+            </IconButton>
+          </>
+        }
+      />
       {creating && (
         <form
           className="px-2 pb-2"
@@ -161,15 +214,50 @@ export function FileTree() {
               if (!name) setCreating(null);
             }}
             placeholder={creating === "dir" ? "folder/path" : "src/file.ts"}
-            className="w-full rounded-md border border-line bg-bg px-2 py-1 font-mono text-xs outline-none focus:border-teal/40"
+            className="w-full rounded-md border border-line bg-bg px-2 py-1 font-mono text-[13px] outline-none focus:border-teal/40"
           />
         </form>
       )}
       <div className="min-h-0 flex-1 overflow-auto px-1 pb-3">
         {tree.map((entry) => (
-          <Node key={entry.path} entry={entry} depth={0} />
+          <Node
+            key={entry.path}
+            entry={entry}
+            depth={0}
+            onContext={(e, item) => setMenu({ x: e.clientX, y: e.clientY, entry: item })}
+          />
         ))}
       </div>
+      {menu && (
+        <div
+          className="menu-panel fixed z-50 min-w-40"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {menu.entry.type === "file" && (
+            <button type="button" className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-hover" onClick={() => { void openFile(menu.entry.path); setMenu(null); }}>
+              Open
+            </button>
+          )}
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-hover"
+            onClick={() => {
+              void navigator.clipboard.writeText(menu.entry.path);
+              setMenu(null);
+            }}
+          >
+            Copy path
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-rose hover:bg-hover"
+            onClick={() => void remove(menu.entry)}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }

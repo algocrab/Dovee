@@ -1,4 +1,5 @@
-import { streamDeepSeek, type ChatMessage, type ToolCall } from "./deepseek";
+import { streamChat, type ChatMessage, type ToolCall } from "./llm";
+import { getProvider } from "./providers";
 import { loadSettings } from "./settings";
 import { buildSystemPrompt } from "./system-prompt";
 import { executeTool, TOOL_SCHEMAS } from "./tools";
@@ -27,9 +28,10 @@ export async function* runAgent(
 ): AsyncGenerator<AgentEvent> {
   const settings = await loadSettings();
   if (!settings.apiKey) {
+    const provider = getProvider(settings.provider);
     yield {
       type: "error",
-      message: "No DeepSeek API key. Open Settings and paste your key from https://platform.deepseek.com",
+      message: `No API key for ${provider.label}. Open Settings and paste a key${provider.docs ? ` from ${provider.docs}` : ""}.`,
     };
     return;
   }
@@ -58,7 +60,7 @@ export async function* runAgent(
     let finish: string | null | undefined;
 
     try {
-      for await (const delta of streamDeepSeek({
+      for await (const delta of streamChat({
         settings,
         messages,
         tools: TOOL_SCHEMAS,

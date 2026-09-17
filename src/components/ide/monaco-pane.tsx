@@ -1,68 +1,121 @@
 "use client";
 
 import Editor, { type OnMount } from "@monaco-editor/react";
+import { useEffect, useRef } from "react";
+import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
+import { EditorWelcome } from "./chrome";
+
+function defineThemes(monaco: Parameters<OnMount>[1]) {
+  monaco.editor.defineTheme("dovee-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [
+      { token: "comment", foreground: "6b6876", fontStyle: "italic" },
+      { token: "string", foreground: "e4b86a" },
+      { token: "keyword", foreground: "7dd3c0" },
+      { token: "number", foreground: "e07a7a" },
+    ],
+    colors: {
+      "editor.background": "#0c0d12",
+      "editor.foreground": "#e8e4dc",
+      "editorLineNumber.foreground": "#4a4954",
+      "editorLineNumber.activeForeground": "#7dd3c0",
+      "editor.selectionBackground": "#7dd3c033",
+      "editor.lineHighlightBackground": "#ffffff06",
+      "editorCursor.foreground": "#7dd3c0",
+      "editorWidget.background": "#13141c",
+      "editorWidget.border": "#23242f",
+    },
+  });
+  monaco.editor.defineTheme("dovee-light", {
+    base: "vs",
+    inherit: true,
+    rules: [
+      { token: "comment", foreground: "7a746c", fontStyle: "italic" },
+      { token: "string", foreground: "9a3412" },
+      { token: "keyword", foreground: "0f766e" },
+      { token: "number", foreground: "b42318" },
+    ],
+    colors: {
+      "editor.background": "#fffcf7",
+      "editor.foreground": "#1c1916",
+      "editorLineNumber.foreground": "#9a9388",
+      "editorLineNumber.activeForeground": "#0f766e",
+      "editor.selectionBackground": "#0f766e22",
+      "editor.lineHighlightBackground": "#1c191608",
+      "editorCursor.foreground": "#0f766e",
+      "editorWidget.background": "#ffffff",
+      "editorWidget.border": "#e7e0d6",
+    },
+  });
+  monaco.editor.defineTheme("dovee-dusk", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [
+      { token: "comment", foreground: "8a7464", fontStyle: "italic" },
+      { token: "string", foreground: "f0c27a" },
+      { token: "keyword", foreground: "e8a87c" },
+      { token: "number", foreground: "e07a7a" },
+    ],
+    colors: {
+      "editor.background": "#1a1512",
+      "editor.foreground": "#f3e6d4",
+      "editorLineNumber.foreground": "#6e5c4e",
+      "editorLineNumber.activeForeground": "#e8a87c",
+      "editor.selectionBackground": "#e8a87c33",
+      "editor.lineHighlightBackground": "#ffffff06",
+      "editorCursor.foreground": "#e8a87c",
+      "editorWidget.background": "#271f19",
+      "editorWidget.border": "#3a2e24",
+    },
+  });
+}
 
 export function MonacoPane() {
   const tabs = useIde((s) => s.tabs);
   const activePath = useIde((s) => s.activePath);
   const updateContent = useIde((s) => s.updateContent);
   const setCursor = useIde((s) => s.setCursor);
+  const theme = (useIde((s) => s.settings?.theme) ?? "dark") as ThemeId;
+  const fontSize = useIde((s) => s.settings?.editorFontSize ?? 15);
+  const wordWrap = useIde((s) => s.settings?.wordWrap ?? true);
+  const minimap = useIde((s) => s.settings?.minimap ?? false);
   const tab = tabs.find((t) => t.path === activePath);
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+
+  useEffect(() => {
+    monacoRef.current?.editor.setTheme(MONACO_THEME[theme]);
+  }, [theme]);
 
   const onMount: OnMount = (editor, monaco) => {
-    monaco.editor.defineTheme("dovee-dark", {
-      base: "vs-dark",
-      inherit: true,
-      rules: [
-        { token: "comment", foreground: "6b6876", fontStyle: "italic" },
-        { token: "string", foreground: "e4b86a" },
-        { token: "keyword", foreground: "7dd3c0" },
-        { token: "number", foreground: "e07a7a" },
-      ],
-      colors: {
-        "editor.background": "#0c0d12",
-        "editor.foreground": "#e8e4dc",
-        "editorLineNumber.foreground": "#4a4954",
-        "editorLineNumber.activeForeground": "#7dd3c0",
-        "editor.selectionBackground": "#7dd3c033",
-        "editor.lineHighlightBackground": "#ffffff06",
-        "editorCursor.foreground": "#7dd3c0",
-        "editorWidget.background": "#13141c",
-        "editorWidget.border": "#23242f",
-        "editorIndentGuide.background": "#ffffff0c",
-      },
-    });
-    monaco.editor.setTheme("dovee-dark");
+    monacoRef.current = monaco;
+    defineThemes(monaco);
+    monaco.editor.setTheme(MONACO_THEME[theme]);
     editor.onDidChangeCursorPosition((e) => {
       setCursor(e.position.lineNumber, e.position.column);
     });
   };
 
   if (!tab) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-        <div className="text-4xl text-teal/80">✧</div>
-        <p className="text-sm text-muted">Open a file from the explorer, or ask Dovee to start building.</p>
-        <p className="font-mono text-[11px] text-muted/70">Ctrl+P · files &nbsp; Ctrl+L · agent &nbsp; Ctrl+` · terminal</p>
-      </div>
-    );
+    return <EditorWelcome />;
   }
 
   return (
     <Editor
       key={tab.path}
       height="100%"
-      theme="dovee-dark"
+      theme={MONACO_THEME[theme]}
       language={tab.language}
       value={tab.content}
       onChange={(value) => updateContent(tab.path, value ?? "")}
       onMount={onMount}
       options={{
         fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-        fontSize: 13,
-        lineHeight: 20,
-        minimap: { enabled: false },
+        fontSize,
+        lineHeight: Math.round(fontSize * 1.55),
+        minimap: { enabled: minimap },
+        wordWrap: wordWrap ? "on" : "off",
         scrollBeyondLastLine: false,
         automaticLayout: true,
         padding: { top: 12 },
@@ -71,6 +124,7 @@ export function MonacoPane() {
         cursorBlinking: "smooth",
         renderLineHighlight: "line",
         bracketPairColorization: { enabled: true },
+        formatOnPaste: true,
       }}
     />
   );

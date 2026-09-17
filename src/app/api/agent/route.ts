@@ -1,5 +1,5 @@
 import { runAgent, type AgentEvent } from "@/lib/agent";
-import type { ChatMessage } from "@/lib/deepseek";
+import type { ChatMessage } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

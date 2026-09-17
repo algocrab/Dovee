@@ -2,11 +2,17 @@
   "name": "dovee",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.cjs",
+  "productName": "Dovee",
   "scripts": {
-    "dev": "next dev --turbopack --port 3100",
+    "dev": "next dev --turbopack --port 3100 --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start --port 3100",
-    "lint": "eslint"
+    "start": "next start --port 3100 --hostname 127.0.0.1",
+    "desktop": "electron .",
+    "desktop:prod": "electron . --prod",
+    "lint": "eslint",
+    "harness": "dsh web --no-open",
+    "harness:open": "dsh web"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -15,7 +21,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.544.0",
     "monaco-editor": "^0.52.2",
-    "next": "16.2.10",
+    "next": "^16.3.5",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
@@ -24,6 +30,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh": "^0.1.6-alpha.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

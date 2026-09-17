@@ -208,7 +208,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
               onClick={() => useIde.getState().setActiveChat(c.id)}
               className={cn(
                 "group flex max-w-[140px] items-center gap-1 rounded px-2 py-1 text-[11px]",
-                c.id === activeChatId ? "bg-gold/15 text-gold" : "text-muted hover:bg-white/5",
+                c.id === activeChatId ? "bg-gold/15 text-gold" : "text-muted hover:bg-hover",
               )}
               title={c.title}
             >
@@ -228,7 +228,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
         <button
           type="button"
           onClick={() => useIde.getState().newChat()}
-          className="shrink-0 rounded p-1 text-muted hover:bg-white/5 hover:text-text"
+          className="shrink-0 rounded p-1 text-muted hover:bg-hover hover:text-text"
           title="New chat"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -236,20 +236,32 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
       </div>
       <div ref={scroller} className="min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3">
         {messages.length === 0 && (
-          <div className="mt-8 space-y-3 text-center">
-            <p className="text-sm text-text">What should we build?</p>
-            <p className="text-xs text-muted">
-              Dovee reads your repo, edits files, and runs commands with DeepSeek V4.1 Flash.
+          <div className="mt-6 space-y-4 text-center">
+            <p className="text-sm font-medium text-text">What should we build?</p>
+            <p className="text-xs leading-relaxed text-muted">
+              Dovee reads your repo, edits files, and runs commands with any model API you connect.
             </p>
             {!hasKey && (
               <button
                 type="button"
                 onClick={() => useIde.getState().setSettingsOpen(true)}
-                className="rounded-full border border-gold/30 bg-gold/10 px-3 py-1 text-xs text-gold"
+                className="rounded-full border border-gold/30 bg-gold/10 px-3 py-1 text-xs text-gold hover:bg-gold/20"
               >
-                Add DeepSeek API key
+                Add an API key
               </button>
             )}
+            <div className="flex flex-col gap-1.5 pt-1">
+              {["Give me a tour of this repo", "Find obvious bugs", "Improve the current UI"].map((hint) => (
+                <button
+                  key={hint}
+                  type="button"
+                  onClick={() => setDrafts((d) => ({ ...d, [activeChatId]: hint }))}
+                  className="rounded-lg border border-line bg-bg/40 px-3 py-2 text-left text-[12px] text-muted hover:border-teal/30 hover:bg-hover hover:text-text"
+                >
+                  {hint}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((msg) => (
@@ -269,7 +281,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
           void send();
         }}
       >
-        <div className="rounded-xl border border-line bg-bg-2 focus-within:border-teal/35">
+        <div className="rounded-xl border border-line bg-bg-2 focus-within:border-teal/40 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--teal)_14%,transparent)]">
           <textarea
             value={draft}
             onChange={(e) => setDrafts((d) => ({ ...d, [activeChatId]: e.target.value }))}
@@ -294,7 +306,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
               <button
                 type="submit"
                 disabled={!draft.trim()}
-                className="rounded-md bg-teal/15 px-2.5 py-1 text-[11px] text-teal disabled:opacity-40"
+                className="rounded-md bg-teal/20 px-2.5 py-1 text-[11px] text-teal hover:bg-teal/30 disabled:opacity-40"
               >
                 Send
               </button>

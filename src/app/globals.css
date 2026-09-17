@@ -1,18 +1,59 @@
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
 
-:root {
+:root,
+html[data-theme="dark"] {
   --bg: #09090b;
-  --bg-1: #0e0f14;
-  --bg-2: #13141c;
-  --bg-3: #1a1b25;
-  --line: rgba(232, 228, 220, 0.08);
-  --text: #e8e4dc;
-  --muted: #8b8896;
+  --bg-1: #101117;
+  --bg-2: #161821;
+  --bg-3: #1e2030;
+  --line: rgba(232, 228, 220, 0.1);
+  --text: #eeeae3;
+  --muted: #9a97a3;
   --teal: #7dd3c0;
   --gold: #e4b86a;
   --rose: #e07a7a;
   --green: #86c98a;
+  --hover: rgba(238, 234, 227, 0.07);
+  --overlay: rgba(9, 9, 11, 0.55);
+  --editor-bg: #0c0d12;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+html[data-theme="light"] {
+  --bg: #f3efe8;
+  --bg-1: #faf7f2;
+  --bg-2: #ffffff;
+  --bg-3: #ebe6dd;
+  --line: rgba(40, 32, 24, 0.12);
+  --text: #1c1916;
+  --muted: #6b6560;
+  --teal: #0f766e;
+  --gold: #b45309;
+  --rose: #b42318;
+  --green: #3f7a44;
+  --hover: rgba(28, 25, 22, 0.06);
+  --overlay: rgba(28, 25, 22, 0.4);
+  --editor-bg: #fffcf7;
+  --shadow: 0 18px 50px rgba(28, 25, 22, 0.18);
+}
+
+html[data-theme="dusk"] {
+  --bg: #161210;
+  --bg-1: #1d1814;
+  --bg-2: #271f19;
+  --bg-3: #322820;
+  --line: rgba(240, 220, 190, 0.1);
+  --text: #f3e6d4;
+  --muted: #b09a86;
+  --teal: #e8a87c;
+  --gold: #f0c27a;
+  --rose: #e07a7a;
+  --green: #9cba7a;
+  --hover: rgba(243, 230, 212, 0.07);
+  --overlay: rgba(22, 18, 16, 0.55);
+  --editor-bg: #1a1512;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
 }
 
 @theme inline {
@@ -27,6 +68,8 @@
   --color-gold: var(--gold);
   --color-rose: var(--rose);
   --color-green: var(--green);
+  --color-hover: var(--hover);
+  --color-overlay: var(--overlay);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -34,7 +77,7 @@
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
-  scrollbar-color: rgba(232, 228, 220, 0.12) transparent;
+  scrollbar-color: color-mix(in srgb, var(--text) 18%, transparent) transparent;
 }
 
 html,
@@ -44,7 +87,9 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 15px;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -52,41 +97,77 @@ input,
 textarea,
 select {
   font-family: inherit;
+  font-size: inherit;
+}
+
+button {
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+input[type="range"] {
+  accent-color: var(--teal);
+}
+
+input:not([type="checkbox"]):not([type="range"]):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 16%, transparent);
 }
 
 ::selection {
   background: color-mix(in srgb, var(--teal) 35%, transparent);
 }
 
+.text-\[10px\] {
+  font-size: 12px !important;
+}
+.text-\[11px\] {
+  font-size: 13px !important;
+}
+.text-\[12px\],
+.text-\[12\.5px\] {
+  font-size: 14px !important;
+}
+.text-\[13px\] {
+  font-size: 15px !important;
+}
+.text-xs {
+  font-size: 13px !important;
+  line-height: 1.4;
+}
+
 .xterm {
   height: 100%;
   padding: 8px 10px;
+  background-color: var(--editor-bg) !important;
 }
 
-.xterm-viewport {
-  background: transparent !important;
+.xterm-viewport,
+.xterm-screen {
+  background-color: var(--editor-bg) !important;
 }
 
 .markdown-body p {
-  margin: 0.4em 0;
+  margin: 0.45em 0;
 }
 
 .markdown-body pre {
-  background: #0a0b10;
+  background: var(--editor-bg);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
   overflow: auto;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .markdown-body code {
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.9em;
+  font-size: 0.92em;
 }
 
 .markdown-body :not(pre) > code {
-  background: rgba(125, 211, 192, 0.1);
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
   padding: 0.1em 0.35em;
   border-radius: 4px;
 }
@@ -99,4 +180,46 @@ select {
 
 .markdown-body a {
   color: var(--teal);
+}
+
+.menu-panel {
+  min-width: 220px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
+  backdrop-filter: blur(16px);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: var(--shadow);
+}
+
+.resize-x,
+.resize-y {
+  z-index: 10;
+}
+
+.resize-x {
+  position: absolute;
+  inset-block: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.resize-y {
+  position: absolute;
+  inset-inline: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.resize-x:hover,
+.resize-x:active,
+.resize-y:hover,
+.resize-y:active {
+  background: color-mix(in srgb, var(--teal) 42%, transparent);
+}
+
+.welcome-grid {
+  background-image:
+    radial-gradient(color-mix(in srgb, var(--teal) 14%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
 }
