@@ -1,9 +1,10 @@
 "use client";
 
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
+import { AddToChatButton, type ChatSpot } from "./add-to-chat";
 import { EditorWelcome } from "./chrome";
 
 function appearanceOptions(fontSize: number, wordWrap: boolean, minimap: boolean) {
@@ -93,6 +94,9 @@ export function MonacoPane() {
   const tab = tabs.find((t) => t.path === activePath);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const pathRef = useRef<string | null>(tab?.path ?? null);
+  const [spot, setSpot] = useState<ChatSpot | null>(null);
+  pathRef.current = tab?.path ?? null;
 
   useEffect(() => {
     monacoRef.current?.editor.setTheme(MONACO_THEME[theme]);
@@ -104,17 +108,62 @@ export function MonacoPane() {
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
   }, [fontSize, wordWrap, minimap]);
 
+  useEffect(() => {
+    setSpot(null);
+  }, [tab?.path]);
+
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     defineThemes(monaco);
     monaco.editor.setTheme(MONACO_THEME[theme]);
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
+    const showSelectionAction = () => {
+      const selection = editor.getSelection();
+      const model = editor.getModel();
+      if (!selection || selection.isEmpty() || !model) {
+        setSpot(null);
+        return;
+      }
+      const text = model.getValueInRange(selection);
+      if (!text.trim()) {
+        setSpot(null);
+        return;
+      }
+      const dom = editor.getDomNode();
+      const end = editor.getScrolledVisiblePosition(selection.getEndPosition());
+      if (!dom || !end) {
+        setSpot(null);
+        return;
+      }
+      const box = dom.getBoundingClientRect();
+      const startLine = selection.getStartPosition().lineNumber;
+      const endLine = selection.getEndPosition().lineNumber;
+      const path = pathRef.current;
+      const label = path
+        ? `\`${path}\` (${startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`})`
+        : undefined;
+      const anchorTop = box.top + end.top;
+      const below = anchorTop - box.top < 40;
+      const half = 70;
+      const minX = box.left + half;
+      const maxX = Math.max(minX, box.right - half);
+      setSpot({
+        x: Math.min(Math.max(box.left + end.left, minX), maxX),
+        y: below ? anchorTop + end.height + 6 : anchorTop - 6,
+        below,
+        text,
+        label,
+      });
+    };
+    editor.onDidChangeCursorSelection(showSelectionAction);
+    editor.onDidScrollChange(() => setSpot(null));
     editor.onDidChangeCursorPosition((e) => {
       setCursor(e.position.lineNumber, e.position.column);
     });
     editor.onDidDispose(() => {
       if (editorRef.current === editor) editorRef.current = null;
+      setSpot(null);
     });
   };
 
@@ -123,27 +172,30 @@ export function MonacoPane() {
   }
 
   return (
-    <Editor
-      key={tab.path}
-      height="100%"
-      theme={MONACO_THEME[theme]}
-      language={tab.language}
-      value={tab.content}
-      onChange={(value) => updateContent(tab.path, value ?? "")}
-      onMount={onMount}
-      options={{
-        fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-        ...appearanceOptions(fontSize, wordWrap, minimap),
-        scrollBeyondLastLine: false,
-        automaticLayout: true,
-        padding: { top: 12 },
-        tabSize: 2,
-        smoothScrolling: true,
-        cursorBlinking: "smooth",
-        renderLineHighlight: "line",
-        bracketPairColorization: { enabled: true },
-        formatOnPaste: true,
-      }}
-    />
+    <>
+      <Editor
+        key={tab.path}
+        height="100%"
+        theme={MONACO_THEME[theme]}
+        language={tab.language}
+        value={tab.content}
+        onChange={(value) => updateContent(tab.path, value ?? "")}
+        onMount={onMount}
+        options={{
+          fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
+          ...appearanceOptions(fontSize, wordWrap, minimap),
+          scrollBeyondLastLine: false,
+          automaticLayout: true,
+          padding: { top: 12 },
+          tabSize: 2,
+          smoothScrolling: true,
+          cursorBlinking: "smooth",
+          renderLineHighlight: "line",
+          bracketPairColorization: { enabled: true },
+          formatOnPaste: true,
+        }}
+      />
+      {spot && <AddToChatButton spot={spot} onDone={() => setSpot(null)} />}
+    </>
   );
 }

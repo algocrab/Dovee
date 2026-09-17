@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ThemeId } from "@/lib/theme";
+import type { AgentChat, ChatAttachment, ChatInsertion, ChatMsg, ToolCard } from "@/types/chat";
 
 export type TreeEntry = { name: string; path: string; type: "file" | "dir" };
 
@@ -10,39 +11,7 @@ export type Tab = {
   language: string;
 };
 
-export type ToolCard = {
-  id: string;
-  name: string;
-  arguments: string;
-  output?: string;
-  ok?: boolean;
-  status: "running" | "done" | "error";
-};
-
-export type ChatAttachment = {
-  id: string;
-  name: string;
-  mime: string;
-  kind: "image" | "text";
-  dataUrl?: string;
-  text?: string;
-};
-
-export type ChatMsg = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  thinking?: string;
-  tools: ToolCard[];
-  attachments?: ChatAttachment[];
-};
-
-export type AgentChat = {
-  id: string;
-  title: string;
-  messages: ChatMsg[];
-  streaming: boolean;
-};
+export type { AgentChat, ChatAttachment, ChatInsertion, ChatMsg, ToolCard };
 
 export type TermTab = {
   id: string;
@@ -112,6 +81,7 @@ type IdeState = {
   activeChatId: string;
   termTabs: TermTab[];
   activeTermId: string;
+  chatInsertions: ChatInsertion[];
   gitBranch: string;
   status: string;
   setSettings: (s: PublicSettings) => void;
@@ -139,8 +109,11 @@ type IdeState = {
   markSaved: (path: string) => void;
   reloadTab: (path: string, content: string) => void;
   setActiveChat: (id: string) => void;
+  hydrateChats: (chats: AgentChat[], activeChatId: string) => void;
   newChat: () => string;
   closeChat: (id: string) => void;
+  addToChat: (text: string) => void;
+  consumeChatInsertions: () => ChatInsertion[];
   addUserMessage: (chatId: string, content: string, attachments?: ChatAttachment[]) => string;
   ensureAssistant: (chatId: string) => string;
   appendThinking: (chatId: string, text: string) => void;
@@ -180,6 +153,7 @@ export const useIde = create<IdeState>((set, get) => ({
   fileIndex: [],
   chats: [firstChat],
   activeChatId: firstChat.id,
+  chatInsertions: [],
   termTabs: [firstTerm],
   activeTermId: firstTerm.id,
   gitBranch: "",
@@ -237,6 +211,15 @@ export const useIde = create<IdeState>((set, get) => ({
       ),
     })),
   setActiveChat: (activeChatId) => set({ activeChatId, agentOpen: true }),
+  // Restores chats saved to disk. Keeps the placeholder chat when there is nothing stored.
+  hydrateChats: (chats, activeChatId) =>
+    set(() => {
+      if (!chats.length) return {};
+      const active = chats.some((c) => c.id === activeChatId)
+        ? activeChatId
+        : chats[chats.length - 1]?.id ?? activeChatId;
+      return { chats, activeChatId: active };
+    }),
   newChat: () => {
     const chat = makeChat(get().chats.length + 1);
     set((s) => ({
@@ -253,9 +236,19 @@ export const useIde = create<IdeState>((set, get) => ({
         return { chats: [chat], activeChatId: chat.id };
       }
       const chats = s.chats.filter((c) => c.id !== id);
-      const activeChatId = s.activeChatId === id ? chats[chats.length - 1].id : s.activeChatId;
+      const activeChatId = s.activeChatId === id ? chats[chats.length - 1]?.id ?? s.activeChatId : s.activeChatId;
       return { chats, activeChatId };
     }),
+  addToChat: (text) =>
+    set((s) => ({
+      chatInsertions: [...s.chatInsertions, { id: uid(), text }],
+      agentOpen: true,
+    })),
+  consumeChatInsertions: () => {
+    const insertions = get().chatInsertions;
+    if (insertions.length) set({ chatInsertions: [] });
+    return insertions;
+  },
   addUserMessage: (chatId, content, attachments) => {
     const id = uid();
     const titleSource = content.trim() || attachments?.[0]?.name || "New chat";

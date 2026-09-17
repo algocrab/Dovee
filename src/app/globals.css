@@ -183,7 +183,7 @@ select:focus-visible {
 }
 
 .menu-panel {
-  min-width: 220px;
+  min-width: 260px;
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   backdrop-filter: blur(16px);

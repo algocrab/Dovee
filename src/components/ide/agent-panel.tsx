@@ -38,6 +38,37 @@ function ToolRow({ tool }: { tool: ToolCard }) {
   );
 }
 
+function ToolSummary({ tools }: { tools: ToolCard[] }) {
+  const [open, setOpen] = useState(false);
+  const running = tools.some((tool) => tool.status === "running");
+  const errors = tools.filter((tool) => tool.status === "error").length;
+  const reads = tools.filter((tool) => /read|list|search|tree/i.test(tool.name)).length;
+  const writes = tools.filter((tool) => /write|edit|rename|delete|mkdir/i.test(tool.name)).length;
+  const parts = [
+    reads ? `${reads} read` : "",
+    writes ? `${writes} changed` : "",
+    !reads && !writes ? `${tools.length} action${tools.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  return (
+    <div className="overflow-hidden rounded-lg border border-line/70 bg-bg/35">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] text-muted hover:bg-hover"
+      >
+        <span className={cn("h-1.5 w-1.5 rounded-full", running ? "animate-pulse bg-gold" : errors ? "bg-rose" : "bg-green")} />
+        <span className="truncate">{running ? "Working in the background" : parts.join(" · ")}</span>
+        <span className="ml-auto shrink-0 font-mono text-[10px] text-muted/70">{open ? "hide" : "show"}</span>
+      </button>
+      {open && (
+        <div className="space-y-1 border-t border-line/70 p-1.5">
+          {tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Message({ msg }: { msg: ChatMsg }) {
   if (msg.role === "user") {
     const images = msg.attachments?.filter((a) => a.kind === "image" && a.dataUrl) ?? [];
@@ -74,9 +105,7 @@ function Message({ msg }: { msg: ChatMsg }) {
           <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[10px]">{msg.thinking}</pre>
         </details>
       )}
-      {msg.tools.map((tool) => (
-        <ToolRow key={tool.id} tool={tool} />
-      ))}
+      {msg.tools.length > 0 && <ToolSummary tools={msg.tools} />}
       {msg.content && (
         <div className="markdown-body text-[13px] leading-relaxed">
           <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
@@ -96,18 +125,46 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Record<string, ChatAttachment[]>>({});
   const [dragging, setDragging] = useState(false);
+  const insertions = useIde((s) => s.chatInsertions);
   const draft = drafts[activeChatId] ?? "";
   const attachments = pending[activeChatId] ?? [];
   const scroller = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef(pending);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusComposer = useRef(false);
+  const stickToBottom = useRef(true);
 
   useEffect(() => {
     pendingRef.current = pending;
   }, [pending]);
+  // Selections sent over with "Add to chat" land in the composer draft.
+  useEffect(() => {
+    if (!insertions.length) return;
+    const queued = useIde.getState().consumeChatInsertions();
+    const added = queued.map((item) => item.text).filter(Boolean);
+    if (!added.length) return;
+    focusComposer.current = true;
+    setDrafts((d) => {
+      const existing = (d[activeChatId] ?? "").replace(/\s+$/, "");
+      return { ...d, [activeChatId]: existing ? `${existing}\n\n${added.join("\n\n")}` : added.join("\n\n") };
+    });
+  }, [insertions, activeChatId]);
 
   useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+    if (!focusComposer.current) return;
+    focusComposer.current = false;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [drafts, activeChatId]);
+
+
+  useEffect(() => {
+    if (!stickToBottom.current) return;
+    const element = scroller.current;
+    if (element) element.scrollTop = element.scrollHeight;
   }, [chat?.messages, chat?.streaming, activeChatId]);
 
   const addFiles = useCallback(async (fileList: File[]) => {
@@ -136,7 +193,9 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
 
     const history: Array<Record<string, unknown>> = [];
     const after = useIde.getState().chats.find((c) => c.id === chatId);
-    for (const m of (after?.messages ?? []).slice(0, -1)) {
+    // Keep the prompt bounded: recent turns are more useful than replaying a
+    // large tool transcript on every request.
+    for (const m of (after?.messages ?? []).slice(-24, -1)) {
       if (m.role === "user") {
         history.push({ role: "user", content: userApiContent(m.content, m.attachments) });
         continue;
@@ -155,7 +214,11 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
       });
       for (const t of m.tools) {
         if (t.output === undefined) continue;
-        history.push({ role: "tool", tool_call_id: t.id, content: t.output });
+        history.push({
+          role: "tool",
+          tool_call_id: t.id,
+          content: t.output.length > 1200 ? `${t.output.slice(0, 1100)}\n[…output truncated]` : t.output,
+        });
       }
     }
 
@@ -318,7 +381,14 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
           <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
-      <div ref={scroller} className="min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3">
+      <div
+        ref={scroller}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          stickToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+        }}
+        className="min-h-0 flex-1 space-y-4 overflow-auto px-3 py-3"
+      >
         {messages.length === 0 && (
           <div className="mt-6 space-y-4 text-center">
             <p className="text-sm font-medium text-text">What should we build?</p>

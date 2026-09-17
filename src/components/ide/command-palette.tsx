@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { closeAllTabs, closeTabSafe, createNewFile, persistAppearance, saveAll, saveTab } from "./actions";
+import { closeAllTabs, closeTabSafe, createNewFile, openFolder, openNewWindow, persistAppearance, pickOpenFile, saveAll, saveTab } from "./actions";
 import { openFile } from "./file-tree";
 import { useIde } from "@/stores/ide-store";
 
@@ -23,6 +23,9 @@ function CommandPaletteInner() {
     const g = () => useIde.getState();
     return [
       { id: "file", label: "Go to File", run: () => g().setCommandOpen(true, "files") },
+      { id: "open-file", label: "Open File", run: () => pickOpenFile() },
+      { id: "open-folder", label: "Open Folder", run: () => void openFolder() },
+      { id: "new-window", label: "New Window", run: () => openNewWindow() },
       { id: "new", label: "New File", run: () => void createNewFile() },
       { id: "save", label: "Save", run: () => g().activePath && void saveTab(g().activePath!) },
       { id: "save-all", label: "Save All", run: () => void saveAll() },

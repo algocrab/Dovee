@@ -7,7 +7,8 @@ import { cn } from "@/lib/cn";
 import { useDesktopApp } from "@/lib/desktop";
 import { applyEditorFontSize, applyTheme, THEMES, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
-import { closeTabSafe, createNewFile, persistAppearance, refreshProblems, saveAll, saveTab } from "./actions";
+import { closeTabSafe, createNewFile, openFolder, openNewWindow, persistAppearance, persistChats, pickOpenFile, refreshProblems, saveAll, saveTab } from "./actions";
+import { SelectionActions } from "./add-to-chat";
 import { AgentPanel } from "./agent-panel";
 import { BottomPanel } from "./bottom-panel";
 import { DoveeWordmark, EditorWelcome, IconButton, StatusSep } from "./chrome";
@@ -39,6 +40,8 @@ export function IdeShell() {
   const gitBranch = useIde((s) => s.gitBranch);
   const problems = useIde((s) => s.problems);
   const abortRef = useRef<Map<string, AbortController>>(new Map());
+  const chordK = useRef(false);
+  const chatsHydrated = useRef(false);
   useDesktopApp();
 
   useEffect(() => {
@@ -57,6 +60,48 @@ export function IdeShell() {
     })();
   }, []);
 
+  // Chats are kept in ~/.dovee/chats.json so a reload no longer wipes them.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await fetch("/api/chats").then((r) => r.json());
+        useIde
+          .getState()
+          .hydrateChats(Array.isArray(data.chats) ? data.chats : [], String(data.activeChatId ?? ""));
+      } catch {
+        /* fall back to a fresh chat when the store cannot be read */
+      }
+      chatsHydrated.current = true;
+    })();
+  }, []);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let last = useIde.getState().chats;
+    const save = () => {
+      if (!chatsHydrated.current) return;
+      void persistChats();
+    };
+    const unsubscribe = useIde.subscribe((s) => {
+      if (s.chats === last) return;
+      last = s.chats;
+      if (!chatsHydrated.current) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(save, 800);
+    });
+    const onVisibility = () => {
+      if (document.visibilityState !== "hidden") return;
+      if (timer) clearTimeout(timer);
+      save();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   useEffect(() => {
     if (!settings?.autoSave) return;
     const timer = setInterval(() => {
@@ -73,9 +118,38 @@ export function IdeShell() {
         useIde.getState().setCommandOpen(true, "commands");
         return;
       }
+      if (meta && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        openNewWindow();
+        return;
+      }
       if (meta && e.key.toLowerCase() === "p") {
         e.preventDefault();
         useIde.getState().setCommandOpen(true, "files");
+      }
+      if (meta && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        chordK.current = true;
+        window.setTimeout(() => {
+          chordK.current = false;
+        }, 1500);
+        return;
+      }
+      if (meta && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        if (chordK.current) {
+          chordK.current = false;
+          void openFolder();
+          return;
+        }
+        pickOpenFile();
+        return;
+      }
+      if (chordK.current && meta && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        chordK.current = false;
+        void saveAll();
+        return;
       }
       if (meta && e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
@@ -359,11 +433,12 @@ export function IdeShell() {
       </footer>
 
       <SettingsModal />
+      <SettingsModal />
       <CommandPalette />
+      <SelectionActions />
     </div>
   );
 }
-
 function RailBtn({
   active,
   onClick,

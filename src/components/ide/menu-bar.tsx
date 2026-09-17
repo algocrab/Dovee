@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { closeAllTabs, closeTabSafe, createNewFile, persistAppearance, saveAll, saveTab } from "./actions";
+import { closeAllTabs, closeTabSafe, createNewFile, openFolder, openNewWindow, persistAppearance, pickOpenFile, saveAll, saveTab } from "./actions";
 import { useDesktopApp } from "@/lib/desktop";
 import { useIde } from "@/stores/ide-store";
 
@@ -50,7 +50,7 @@ function Item({
   return (
     <button
       type="button"
-      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-teal/10"
+      className="flex w-full items-center justify-between gap-6 whitespace-nowrap rounded-md px-2 py-1.5 text-left hover:bg-teal/10"
       onClick={onClick}
     >
       <span>{label}</span>
@@ -70,6 +70,10 @@ function Menu({ name, onDone, isDesktop }: { name: string; onDone: () => void; i
     return (
       <div className="menu-panel absolute left-0 top-full z-40 mt-1">
         <Item label="New File" kbd="Ctrl+N" onClick={() => run(createNewFile)} />
+        <Item label="New Window" kbd="Ctrl+Shift+N" onClick={() => run(openNewWindow)} />
+        <hr className="my-1 border-line" />
+        <Item label="Open File" kbd="Ctrl+O" onClick={() => run(pickOpenFile)} />
+        <Item label="Open Folder" kbd="Ctrl+K O" onClick={() => run(openFolder)} />
         <hr className="my-1 border-line" />
         <Item label="Save" kbd="Ctrl+S" onClick={() => run(() => s.activePath && saveTab(s.activePath))} />
         <Item label="Save All" kbd="Ctrl+K S" onClick={() => run(saveAll)} />

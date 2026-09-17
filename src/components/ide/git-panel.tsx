@@ -50,7 +50,8 @@ function suggestCommitMessage(files: GitFile[]) {
   if (files.length === 0) return "";
   const names = files.map((file) => splitFilePath(file.path).name);
   if (files.length === 1) {
-    const file = files[0]!;
+    const file = files[0];
+    if (!file) return "";
     const name = names[0] ?? file.path;
     if (file.label === "untracked" || file.label === "added") return `Add ${name}`;
     if (file.label === "deleted") return `Remove ${name}`;

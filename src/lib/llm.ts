@@ -151,7 +151,7 @@ function toAnthropicUserContent(content: ChatMessage["content"]) {
   return content.map((part) => {
     if (part.type === "text") return { type: "text", text: part.text };
     const url = part.image_url.url;
-    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(url);
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/.exec(url);
     if (match) {
       return {
         type: "image",

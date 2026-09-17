@@ -8,6 +8,7 @@ declare global {
       minimize: () => void;
       maximize: () => void;
       close: () => void;
+      pickFolder: (startPath?: string) => Promise<string | null>;
     };
   }
 }

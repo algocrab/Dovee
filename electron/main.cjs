@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
@@ -170,6 +170,19 @@ ipcMain.on("window:maximize", (event) => {
 
 ipcMain.on("window:close", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+ipcMain.handle("folder:pick", async (event, startPath) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const options = {
+    title: "Open Folder",
+    buttonLabel: "Select Folder",
+    defaultPath: typeof startPath === "string" && startPath ? startPath : undefined,
+    properties: ["openDirectory", "createDirectory"],
+  };
+  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+  if (result.canceled || !result.filePaths[0]) return null;
+  return result.filePaths[0];
 });
 
 const gotLock = app.requestSingleInstanceLock();

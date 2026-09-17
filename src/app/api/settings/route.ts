@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import { PROVIDERS } from "@/lib/providers";
 import { loadSettings, publicSettings, saveSettings, type DoveeSettings } from "@/lib/settings";
@@ -20,7 +22,16 @@ export async function POST(req: Request) {
     patch.reasoningEffort = body.reasoningEffort;
   }
   if (typeof body.workspace === "string" && body.workspace.trim()) {
-    patch.workspace = body.workspace.trim();
+    const abs = path.resolve(body.workspace.trim());
+    try {
+      const stat = await fs.stat(abs);
+      if (!stat.isDirectory()) {
+        return NextResponse.json({ error: "Not a folder" }, { status: 400 });
+      }
+    } catch {
+      return NextResponse.json({ error: "Folder not found" }, { status: 400 });
+    }
+    patch.workspace = abs;
   }
   if (typeof body.baseUrl === "string" && body.baseUrl.trim()) {
     patch.baseUrl = body.baseUrl.trim();
