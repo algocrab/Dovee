@@ -1,6 +1,7 @@
 "use client";
 
 import Editor, { loader, type OnMount } from "@monaco-editor/react";
+import type { languages } from "monaco-editor";
 import { useEffect, useRef, useState } from "react";
 import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
@@ -10,6 +11,45 @@ import { EditorWelcome } from "./chrome";
 // Serve Monaco from our own bundle instead of the jsDelivr CDN the loader defaults to,
 // so the editor also works offline. scripts/sync-monaco.cjs populates public/monaco.
 loader.config({ paths: { vs: "/monaco/vs" } });
+
+type TypeResponse = {
+  ok: boolean;
+  compilerOptions?: languages.typescript.CompilerOptions;
+  libs?: { path: string; text: string }[];
+  stats?: { packages: number; files: number; bytes: number; skipped: number };
+};
+
+let typeRequest: Promise<TypeResponse> | null = null;
+let typeLibsApplied = false;
+
+function fetchTypeLibs() {
+  if (!typeRequest) {
+    typeRequest = fetch("/api/types")
+      .then((res) => res.json() as Promise<TypeResponse>)
+      .catch(() => {
+        typeRequest = null;
+        return { ok: false } as TypeResponse;
+      });
+  }
+  return typeRequest;
+}
+
+// Feed the workspace's type definitions to Monaco's TS worker. Without this the worker
+// only knows the open buffer, so dependency imports get no completions or hover docs.
+async function loadTypeLibs(monaco: Parameters<OnMount>[1]) {
+  if (typeLibsApplied) return;
+  const data = await fetchTypeLibs();
+  if (!data.ok) return;
+  const defaults = monaco.languages.typescript.typescriptDefaults;
+  if (data.compilerOptions) {
+    defaults.setCompilerOptions({ ...data.compilerOptions, allowNonTsExtensions: true });
+  }
+  for (const lib of data.libs ?? []) {
+    defaults.addExtraLib(lib.text, lib.path);
+  }
+  defaults.setEagerModelSync(true);
+  typeLibsApplied = true;
+}
 
 function appearanceOptions(fontSize: number, wordWrap: boolean, minimap: boolean) {
   return {
@@ -122,6 +162,7 @@ export function MonacoPane() {
     defineThemes(monaco);
     monaco.editor.setTheme(MONACO_THEME[theme]);
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
+    void loadTypeLibs(monaco);
     const showSelectionAction = () => {
       const selection = editor.getSelection();
       const model = editor.getModel();
@@ -183,6 +224,7 @@ export function MonacoPane() {
         height="100%"
         theme={MONACO_THEME[theme]}
         language={tab.language}
+        path={`file:///${tab.path}`}
         value={tab.content}
         onChange={(value) => updateContent(tab.path, value ?? "")}
         onMount={onMount}

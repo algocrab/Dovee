@@ -29,6 +29,7 @@
     "lucide-react": "^0.544.0",
     "monaco-editor": "^0.52.2",
     "next": "^16.3.5",
+    "node-pty": "1.2.0-beta.15",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
@@ -73,7 +74,12 @@
       },
       {
         "from": "public",
-        "to": "public"
+        "to": "public",
+        "filter": [
+          "**/*",
+          "!**/monaco",
+          "!**/monaco/**"
+        ]
       }
     ],
     "win": {

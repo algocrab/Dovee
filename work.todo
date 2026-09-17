@@ -91,3 +91,135 @@ node-pty terminal — P0
 Sprint 2 (daily driver banao): 3. Git diff viewer + per-file staging 4. File watcher (tree/tabs/git auto-refresh) 5. Search options (case, globs, replace) 6. Formatter + format-on-save
 
 Sprint 3 (polish): 7. Command palette fuzzy matching 8. Agent change diff view 9. Editor IntelliSense for deps (addExtraLib)
+
+=== STATUS UPDATE - 2026-09-17 (Dovee agent) ===
+
+DONE
+[x] #1 Monaco local bundling (offline fix) - COMPLETE + verified
+    - scripts/sync-monaco.cjs -> public/monaco/vs (Monaco 0.52.2, gitignored)
+    - monaco-pane.tsx: loader.config({ paths: { vs: "/monaco/vs" } })
+    - package.json: sync:monaco + predev + prebuild hooks
+    - eslint.config.mjs: public/monaco/** ignored
+    - Verified on the INSTALLED app: /monaco/vs/loader.js, editor.main.js, base/worker/workerMain.js = 200
+    - Served loader is 0.52.2 (CDN default was 0.55.1) - version skew fixed too
+
+[x] #2 node-pty terminal - COMPLETE + verified
+    - package.json: node-pty 1.2.0-beta.15 (was an orphan in node_modules, never declared)
+    - src/lib/shell.ts: spawn -> pty.spawn (onData/onExit/resize, disposable cleanup)
+    - src/app/api/terminal/route.ts: cols/rows resize + spawn-time size from query
+    - src/components/ide/terminal-panel.tsx: REMOVED line-buffering (local echo + only full
+      lines were sent) -> raw keystrokes. This is what makes arrow keys, tab completion,
+      history and full-screen apps (vim) work.
+    - next.config.ts: outputFileTracingIncludes for node-pty prebuilds (*.node, *.dll, *.exe)
+    - Verified in dev AND in the production standalone build: PTY spawn, raw keys,
+      up-arrow history recall, resize (120x30 -> 60x20 -> 100x25) all pass
+    - Saved ~20 MB by excluding node-pty *.pdb debug symbols
+
+[x] Extra: removed 13.3 MB duplication - extraResources "public" entry now filters out monaco
+    (resources/public only needs the dovee-logo/wordmark files; standalone serves the rest)
+
+
+NEW BUG FOUND - add to the list
+[ ] P0/P1 Shell env leak
+    The integrated terminal passes Dovee's own server environment into every user shell:
+      NODE_ENV=production
+      TURBOPACK=1
+      PORT=3100
+      __NEXT_PRIVATE_ORIGIN=http://127.0.0.1:3100
+      __NEXT_PRIVATE_STANDALONE_CONFIG={... "outputFileTracingRoot": "...\Dovee\resources\standalone" ...}
+      TURBO_CACHE_DIR=...
+    Effect: running `npm run dev` inside Dovee's terminal is broken:
+      - "non-standard NODE_ENV" warning, dev runs in a production-ish mode
+      - `next dev --webpack` fails: "Multiple bundler flags set: TURBOPACK=1, --webpack"
+      - module resolution points at the INSTALLED APP directory instead of the project,
+        so packages resolve as bogus hashed names (this is what made a native dep look
+        like a Turbopack bug)
+    Fix: strip __NEXT_PRIVATE_*, NODE_ENV, TURBOPACK, PORT, TURBO_CACHE_DIR when building
+    env in spawnShell() (src/lib/shell.ts).
+
+
+NEXT - Sprint 2
+"item 3" is ambiguous, needs a decision:
+  (a) P1 #3 Editor IntelliSense - monaco.languages.typescript config + addExtraLib for
+      node_modules/@types. The todo itself calls this "the biggest practical difference
+      from Cursor/VS Code".
+  (b) Sprint 2 first entry: Git diff viewer + per-file staging.
+
+Housekeeping
+- tsconfig.json is rewritten by `next dev` / `next build` (Next 16 normalisation: adds
+  ./.next/types entries + reformats). Commit it once to stop the recurring diff noise.
+- tsconfig.tsbuildinfo is tracked and churns on every build.
+
+=== STATUS UPDATE #2 - 2026-09-17 (Dovee agent) ===
+
+DONE
+[x] #3 Editor IntelliSense (dependency types) - implemented + server-side verified
+    New files:
+      - src/lib/type-libs.ts        enumerates type entry points + tsconfig -> monaco enums
+      - src/app/api/types/route.ts  GET -> { compilerOptions, libs, stats } (cached)
+    Changed:
+      - src/components/ide/monaco-pane.tsx: loadTypeLibs() called from onMount;
+        setCompilerOptions + addExtraLib per .d.ts + setEagerModelSync(true)
+    Verified: tsc 0, eslint 0, endpoint 200
+      target 'ES2018' -> 5, module 'esnext' -> 99, jsx 'react-jsx' -> 4,
+      moduleResolution 'bundler' -> 2 (NodeJs fallback), lib + paths carried over
+    Payload: 20 packages, 1957 files, 12.76 MB  (see follow-ups)
+
+    Two real bugs found and fixed while verifying (both would have silently broken it):
+      1. I had guessed Monaco's enum numbers. They come from monaco-editor's OWN bundled
+         TypeScript (monaco.d.ts), not the workspace `typescript` package - and the two
+         disagree: the workspace TS uses STRING enums ("es2018"), Monaco uses NUMERIC
+         (ES2018 = 5). Corrected against monaco.d.ts.
+      2. tsconfig writes `"jsx": "react-jsx"` but the lookup keys were `reactjsx`
+         (no hyphen), so jsx was never set - React/JSX IntelliSense, the whole point,
+         was dead. Keys are now hyphenated (plus the bare form).
+
+NOT VERIFIED
+[ ] The in-editor experience. I verified the data layer end to end but have no browser
+    access, so nobody has actually seen completions appear. Needs a visual check by hand.
+
+FOLLOW-UPS for #3
+[ ] Payload is 12.76 MB. lucide-react alone is 5.84 MB, and 3.84 MB of that is
+    lucide-react.{prefixed,suffixed}.d.ts - alternate entry points nobody imports.
+    Real fix: load types on demand per import (scan the buffer, request only the
+    specifiers it uses). Typical file would drop to ~100 KB.
+[ ] Project-local imports still do not resolve, so `@/lib/...` keeps its squiggles.
+    paths is set but baseUrl is absent, and the open file's Monaco model has no `path`,
+    so it has an anonymous in-memory URI. Fix: pass `path={`file:///${tab.path}`}` to
+    <Editor> and feed src/**/*.ts(x) in as extra libs too.
+[ ] The bundle is cached in globalThis for the server process, so installing a new
+    dependency needs a server restart before its types show up.
+[ ] Same optional-path problem affects the earlier env-leak item.
+
+=== STATUS UPDATE #3 - 2026-09-17 (Dovee agent) ===
+
+DONE (IntelliSense follow-ups)
+[x] Project-local imports now resolve - the `@/lib/...` squiggles should be gone
+    - monaco-pane.tsx: added `path={`file:///${tab.path}`}` so the model URI matches
+      the extra-lib URIs.
+    - type-libs.ts: baseUrl is now "file:///" (matches the worker's virtual FS root,
+      so tsconfig `paths: {"@/*": ["./src/*"]}` actually resolves).
+    - type-libs.ts: workspace sources (src/** plus root *.ts) are fed in as extra libs.
+    58 src files + 2 root files + 1957 node_modules = 2017 files, 13 MB.
+
+    Verified before relying on it (these were real risks, not guesses):
+      - monaco tsWorker `_getScriptText` checks the live MODEL before `_extraLibs`,
+        so the open file is always type-checked from the live buffer - an extra lib
+        can never shadow your edits.
+      - @monaco-editor/react syncs `value` into a reused model via executeEdits, so
+        adding `path` does not leave stale content behind (agent edits still land).
+      - Bonus found while checking: `path` enables saveViewState/restoreViewState,
+        so cursor + scroll position now survive tab switches.
+
+Bugs I introduced and caught in the same session (worth remembering)
+[!] A single SKIP_DIRS set was applied to BOTH the project walk and the node_modules
+    walk. It contained "dist", which is exactly where packages keep their .d.ts
+    (next/dist/**, lucide-react/dist/**). Result: dependency types silently dropped
+    from 1957 files / 13.4 MB down to ~398 / 4.6 MB. Now two sets:
+    SKIP_PROJECT_DIRS (with dist/.next/build/...) and SKIP_PACKAGE_DIRS (node_modules
+    only). Lesson: the "payload shrank" signal was the only thing that revealed it -
+    worth keeping an eye on stats after any change to this loader.
+
+Housekeeping
+- tsconfig.json / next-env.d.ts / tsconfig.tsbuildinfo are all rewritten or touched by
+  `next dev` / `next build`. Commit them once so they stop showing as modified.

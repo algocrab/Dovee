@@ -21,13 +21,18 @@ function safeFit(fit: FitAddon | null, host: HTMLElement | null, term: Terminal 
 function TerminalSession({ id, active }: { id: string; active: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  const buffer = useRef("");
   const fitRef = useRef<FitAddon | null>(null);
+  const pushSizeRef = useRef<() => void>(() => {});
   const fontSize = useIde((s) => s.settings?.editorFontSize ?? 15);
   const theme = (useIde((s) => s.settings?.theme) ?? "dark") as ThemeId;
 
   useEffect(() => {
     if (!host.current) return;
+    let disposed = false;
+    let raf = 0;
+    let es: EventSource | null = null;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+
     const term = new Terminal({
       convertEol: true,
       fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
@@ -41,61 +46,61 @@ function TerminalSession({ id, active }: { id: string; active: boolean }) {
     term.loadAddon(fit);
     term.open(host.current);
     termRef.current = term;
-    requestAnimationFrame(() => safeFit(fit, host.current, term));
 
-    const es = new EventSource(`/api/terminal?id=${encodeURIComponent(id)}`);
-    es.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data) as { text?: string };
-        if (data.text) term.write(data.text);
-      } catch {
-        /* ignore */
-      }
+    const post = (payload: Record<string, unknown>) => {
+      void fetch("/api/terminal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...payload }),
+      });
     };
 
-    term.onData((data) => {
-      if (data === "\r") {
-        term.write("\r\n");
-        void fetch("/api/terminal", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, data: `${buffer.current}\n` }),
-        });
-        buffer.current = "";
-        return;
-      }
-      if (data === "\u007f") {
-        if (!buffer.current) return;
-        buffer.current = buffer.current.slice(0, -1);
-        term.write("\b \b");
-        return;
-      }
-      if (data === "\u0003") {
-        buffer.current = "";
-        term.write("^C\r\n");
-        void fetch("/api/terminal", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, data: "\u0003" }),
-        });
-        return;
-      }
-      buffer.current += data;
-      term.write(data);
+    // Keystrokes go to the pty verbatim — the shell owns echo, line editing and
+    // history. Buffering lines here (as we used to) broke arrow keys, tab
+    // completion and every full-screen program.
+    term.onData((data) => post({ data }));
+
+    pushSizeRef.current = () => {
+      safeFit(fit, host.current, term);
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (!disposed) post({ cols: term.cols, rows: term.rows });
+      }, 120);
+    };
+
+    // Fit before connecting so the pty is created at the real terminal size.
+    raf = requestAnimationFrame(() => {
+      if (disposed) return;
+      safeFit(fit, host.current, term);
+      es = new EventSource(
+        `/api/terminal?id=${encodeURIComponent(id)}&cols=${term.cols}&rows=${term.rows}`,
+      );
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data) as { text?: string };
+          if (data.text) term.write(data.text);
+        } catch {
+          /* ignore */
+        }
+      };
     });
 
-    const onResize = () => safeFit(fit, host.current, term);
+    const onResize = () => pushSizeRef.current();
     window.addEventListener("resize", onResize);
     const observer = new ResizeObserver(onResize);
     observer.observe(host.current);
 
     return () => {
-      es.close();
+      disposed = true;
+      cancelAnimationFrame(raf);
+      if (resizeTimer) clearTimeout(resizeTimer);
+      es?.close();
       window.removeEventListener("resize", onResize);
       observer.disconnect();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      pushSizeRef.current = () => {};
     };
     // theme/fontSize applied in a separate effect so we don't dispose on toggle
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,13 +111,16 @@ function TerminalSession({ id, active }: { id: string; active: boolean }) {
     if (!term) return;
     term.options.theme = XTERM_THEMES[theme];
     term.options.fontSize = fontSize;
-    requestAnimationFrame(() => safeFit(fitRef.current, host.current, term));
+    // Font metrics changed, so the character grid changed too.
+    requestAnimationFrame(() => pushSizeRef.current());
   }, [theme, fontSize]);
 
   useEffect(() => {
     if (active) {
-      requestAnimationFrame(() => safeFit(fitRef.current, host.current, termRef.current));
-      termRef.current?.focus();
+      requestAnimationFrame(() => {
+        pushSizeRef.current();
+        termRef.current?.focus();
+      });
     }
   }, [active]);
 
