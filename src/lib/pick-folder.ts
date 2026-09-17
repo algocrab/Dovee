@@ -43,7 +43,8 @@ async function pickMac(startPath?: string) {
     timeout: TIMEOUT_MS,
     encoding: "utf8",
   });
-  return trimOutput(stdout).replace(/\/$/, "") || null;
+  const picked = trimOutput(stdout);
+  return picked ? picked.replace(/\/$/, "") : null;
 }
 
 async function pickLinux(startPath?: string) {

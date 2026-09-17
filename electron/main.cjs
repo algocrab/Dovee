@@ -6,25 +6,39 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 
-const PORT = Number(process.env.DOVEE_PORT || 3100);
 const HOST = "127.0.0.1";
-const APP_URL = `http://${HOST}:${PORT}`;
-const ROOT = path.join(__dirname, "..");
-const LOGO_SVG = path.join(ROOT, "public", "dovee-logo.svg");
+let PORT = Number(process.env.DOVEE_PORT || 3100);
+
+const PROJECT_ROOT = path.join(__dirname, "..");
 const ICON_PNG = path.join(__dirname, "icon.png");
-const ICON_PATH = fs.existsSync(ICON_PNG) ? ICON_PNG : LOGO_SVG;
+const ICON_PATH = fs.existsSync(ICON_PNG) ? ICON_PNG : path.join(PROJECT_ROOT, "public", "dovee-logo.svg");
 
 let mainWindow = null;
 let nextProcess = null;
 let startedNext = false;
 
+function appUrl() {
+  return `http://${HOST}:${PORT}`;
+}
+
 function isDev() {
+  if (app.isPackaged) return false;
   return !process.argv.includes("--prod") && process.env.DOVEE_PROD !== "1";
+}
+
+function standaloneRoot() {
+  if (app.isPackaged) return path.join(process.resourcesPath, "standalone");
+  return path.join(PROJECT_ROOT, ".next", "standalone");
+}
+
+function resourceFile(...parts) {
+  if (app.isPackaged) return path.join(process.resourcesPath, ...parts);
+  return path.join(PROJECT_ROOT, ...parts);
 }
 
 function ping() {
   return new Promise((resolve) => {
-    const req = http.get(APP_URL, (res) => {
+    const req = http.get(appUrl(), (res) => {
       res.resume();
       resolve(typeof res.statusCode === "number" && res.statusCode < 500);
     });
@@ -33,6 +47,24 @@ function ping() {
       req.destroy();
       resolve(false);
     });
+  });
+}
+
+function getAvailablePort(preferred) {
+  return new Promise((resolve) => {
+    const tryListen = (port) => {
+      const server = http.createServer();
+      server.once("error", () => {
+        if (port !== 0) tryListen(0);
+        else resolve(preferred);
+      });
+      server.listen(port, HOST, () => {
+        const address = server.address();
+        const assigned = typeof address === "object" && address ? address.port : preferred;
+        server.close(() => resolve(assigned));
+      });
+    };
+    tryListen(preferred);
   });
 }
 
@@ -45,20 +77,46 @@ async function waitForNext(timeoutMs = 120000) {
   return false;
 }
 
+function startStandalone() {
+  const root = standaloneRoot();
+  const serverJs = path.join(root, "server.js");
+  const env = {
+    ...process.env,
+    PORT: String(PORT),
+    HOSTNAME: HOST,
+    ELECTRON_RUN_AS_NODE: "1",
+  };
+  nextProcess = spawn(process.execPath, [serverJs], {
+    cwd: root,
+    env,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  startedNext = true;
+  nextProcess.on("error", (err) => {
+    console.error("Failed to start Dovee server:", err);
+  });
+}
+
 function startNext() {
+  const serverJs = path.join(standaloneRoot(), "server.js");
+  if (!isDev() && fs.existsSync(serverJs)) {
+    startStandalone();
+    return;
+  }
+
   const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
   const script = isDev() ? "dev" : "start";
   const env = { ...process.env, PORT: String(PORT) };
   delete env.ELECTRON_RUN_AS_NODE;
 
   nextProcess = spawn(npmCmd, ["run", script], {
-    cwd: ROOT,
+    cwd: PROJECT_ROOT,
     env,
     stdio: "inherit",
     windowsHide: true,
   });
   startedNext = true;
-
   nextProcess.on("error", (err) => {
     console.error("Failed to start Next.js:", err);
   });
@@ -68,6 +126,7 @@ function stopNext() {
   if (!nextProcess || !startedNext) return;
   const child = nextProcess;
   nextProcess = null;
+  startedNext = false;
   if (process.platform === "win32" && child.pid) {
     spawn("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
       stdio: "ignore",
@@ -79,11 +138,18 @@ function stopNext() {
 }
 
 function logoMarkup() {
-  try {
-    return fs.readFileSync(LOGO_SVG, "utf8");
-  } catch {
-    return "";
+  const candidates = [
+    resourceFile("public", "dovee-logo.svg"),
+    path.join(PROJECT_ROOT, "public", "dovee-logo.svg"),
+  ];
+  for (const file of candidates) {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      /* try next */
+    }
   }
+  return "";
 }
 
 function loadHtml(win, body, color = "#9a97a3") {
@@ -146,7 +212,7 @@ function createWindow() {
   });
 
   win.webContents.on("will-navigate", (event, url) => {
-    if (url.startsWith(APP_URL) || url.startsWith("data:text/html")) return;
+    if (url.startsWith(appUrl()) || url.startsWith("data:text/html")) return;
     event.preventDefault();
     if (url.startsWith("http://") || url.startsWith("https://")) {
       void shell.openExternal(url);
@@ -206,22 +272,27 @@ if (!gotLock) {
     const win = createWindow();
     await loadHtml(win, "Starting Dovee…");
 
-    const alreadyUp = await ping();
-    if (!alreadyUp) startNext();
+    if (app.isPackaged) {
+      PORT = await getAvailablePort(PORT);
+      startNext();
+    } else {
+      const alreadyUp = await ping();
+      if (!alreadyUp) startNext();
+    }
 
     const ready = await waitForNext();
     if (!ready) {
-      await loadHtml(win, `Could not start Dovee on ${APP_URL}.`, "#e07a7a");
+      await loadHtml(win, `Could not start Dovee on ${appUrl()}.`, "#e07a7a");
       return;
     }
 
-    await win.loadURL(APP_URL);
+    await win.loadURL(appUrl());
   });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const win = createWindow();
-      void win.loadURL(APP_URL);
+      void win.loadURL(appUrl());
     }
   });
 

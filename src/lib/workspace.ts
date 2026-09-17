@@ -5,7 +5,7 @@ import { loadSettings } from "./settings";
 
 export async function getWorkspaceRoot() {
   const settings = await loadSettings();
-  const root = path.resolve(settings.workspace || process.cwd());
+  const root = path.resolve(/* turbopackIgnore: true */ settings.workspace || process.cwd());
   await fs.mkdir(root, { recursive: true });
   return root;
 }

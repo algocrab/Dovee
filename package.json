@@ -4,6 +4,8 @@
   "private": true,
   "main": "electron/main.cjs",
   "productName": "Dovee",
+  "author": "Dovee",
+  "description": "A local coding IDE with an autonomous agent",
   "scripts": {
     "dev": "next dev --turbopack --port 3100 --hostname 127.0.0.1",
     "build": "next build",
@@ -12,7 +14,9 @@
     "desktop:prod": "electron . --prod",
     "lint": "eslint",
     "harness": "dsh web --no-open",
-    "harness:open": "dsh web"
+    "harness:open": "dsh web",
+    "icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icon.ps1",
+    "dist": "npm run build && node scripts/prepare-standalone.cjs && npm run icon && electron-builder --win"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -36,9 +40,61 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "electron": "^44.4.1",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "com.dovee.ide",
+    "productName": "Dovee",
+    "copyright": "Copyright © Dovee",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "standalone"
+      },
+      {
+        "from": "public",
+        "to": "public"
+      }
+    ],
+    "win": {
+      "icon": "electron/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Dovee"
+    },
+    "portable": {
+      "artifactName": "Dovee-${version}-portable.exe"
+    },
+    "npmRebuild": false
   }
 }
