@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import type { GitCommit, GitStatus } from "@/types/git";
 import { useIde } from "@/stores/ide-store";
 import { IconButton, PanelHeading } from "./chrome";
+import { FileGlyph } from "./file-icon";
 import { openFile } from "./file-tree";
 
 export function GitPanel() {
@@ -204,6 +205,7 @@ export function GitPanel() {
                     className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-hover"
                   >
                     <span className="w-14 shrink-0 font-mono text-[10px] uppercase text-gold">{file.label}</span>
+                    <FileGlyph name={file.path.split("/").pop() ?? file.path} />
                     <span className="min-w-0 truncate font-mono text-[11px]">{file.path}</span>
                   </button>
                 ))}

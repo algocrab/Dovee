@@ -223,3 +223,23 @@ select:focus-visible {
     radial-gradient(color-mix(in srgb, var(--teal) 14%, transparent) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+
+html.desktop header {
+  -webkit-app-region: drag;
+}
+
+html.desktop header button,
+html.desktop header a,
+html.desktop header input,
+html.desktop .menu-panel {
+  -webkit-app-region: no-drag;
+}
+
+html.desktop.platform-darwin header {
+  padding-left: 78px;
+}
+
+html.desktop.platform-win32 header,
+html.desktop.platform-linux header {
+  padding-right: 140px;
+}

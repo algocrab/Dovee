@@ -1,15 +1,26 @@
 "use client";
 
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
+
+function subscribe() {
+  return () => {};
+}
+
+function getDesktopSnapshot() {
+  return Boolean(window.doveeDesktop?.isDesktop);
+}
+
+function getServerSnapshot() {
+  return false;
+}
 
 export function useDesktopApp() {
-  const [desktop, setDesktop] = useState(false);
+  const desktop = useSyncExternalStore(subscribe, getDesktopSnapshot, getServerSnapshot);
 
   useLayoutEffect(() => {
     const api = window.doveeDesktop;
     if (!api?.isDesktop) return;
     document.documentElement.classList.add("desktop", `platform-${api.platform}`);
-    setDesktop(true);
   }, []);
 
   return desktop;

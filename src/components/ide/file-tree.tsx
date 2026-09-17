@@ -4,7 +4,8 @@ import { ChevronRight, Folder, FolderOpen, Pencil, Plus, RefreshCw, Trash2 } fro
 import { useState, type MouseEvent } from "react";
 import { cn } from "@/lib/cn";
 import { useIde, type TreeEntry } from "@/stores/ide-store";
-import { FileGlyph, IconButton, PanelHeading } from "./chrome";
+import { IconButton, PanelHeading } from "./chrome";
+import { FileGlyph } from "./file-icon";
 
 async function loadTree(path = ".") {
   const res = await fetch(`/api/files/tree?path=${encodeURIComponent(path)}`);

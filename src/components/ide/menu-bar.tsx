@@ -9,6 +9,7 @@ const MENUS = ["File", "Edit", "View", "Go", "Terminal", "Help"] as const;
 
 export function MenuBar() {
   const [open, setOpen] = useState<string | null>(null);
+  const isDesktop = useDesktopApp();
 
   useEffect(() => {
     const close = () => setOpen(null);
@@ -30,7 +31,7 @@ export function MenuBar() {
           >
             {name}
           </button>
-          {open === name && <Menu name={name} onDone={() => setOpen(null)} />}
+          {open === name && <Menu name={name} onDone={() => setOpen(null)} isDesktop={isDesktop} />}
         </div>
       ))}
     </div>
@@ -58,7 +59,7 @@ function Item({
   );
 }
 
-function Menu({ name, onDone }: { name: string; onDone: () => void }) {
+function Menu({ name, onDone, isDesktop }: { name: string; onDone: () => void; isDesktop: boolean }) {
   const run = (fn: () => unknown | Promise<unknown>) => {
     void fn();
     onDone();
@@ -77,6 +78,12 @@ function Menu({ name, onDone }: { name: string; onDone: () => void }) {
         <Item label="Close All" onClick={() => run(closeAllTabs)} />
         <hr className="my-1 border-line" />
         <Item label="Settings" kbd="Ctrl+," onClick={() => run(() => s.setSettingsOpen(true))} />
+        {isDesktop ? (
+          <>
+            <hr className="my-1 border-line" />
+            <Item label="Exit" kbd="Alt+F4" onClick={() => run(() => window.doveeDesktop?.close())} />
+          </>
+        ) : null}
       </div>
     );
   }

@@ -1,29 +1,50 @@
 "use client";
 
-import { File } from "lucide-react";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useIde } from "@/stores/ide-store";
 
 export function DoveeMark({ className, size = 22 }: { className?: string; size?: number }) {
+  const uid = useId().replace(/:/g, "");
+  const light = `doveGrad-${uid}`;
+  const dark = `doveGradDark-${uid}`;
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 32 32"
+      viewBox="15 10 210 160"
       width={size}
-      height={size}
+      height={size * 0.76}
       className={cn("shrink-0", className)}
       role="img"
       aria-label="Dovee"
     >
       <title>Dovee</title>
-      <rect width="32" height="32" rx="8" fill="var(--bg-3)" />
-      <path
-        d="M7 18c6-9 13-10 18-8-4 2-6 6-6 10 4-1 7-1 9 1-6 1-11 4-16 4-4 0-6-3-5-7z"
-        fill="var(--teal)"
-      />
-      <circle cx="22.5" cy="12.5" r="1.2" fill="var(--bg)" />
+      <defs>
+        <linearGradient id={light} x1="20%" y1="15%" x2="90%" y2="85%">
+          <stop offset="0%" stopColor="#6C63FF" />
+          <stop offset="100%" stopColor="#38BDF8" />
+        </linearGradient>
+        <linearGradient id={dark} x1="20%" y1="15%" x2="90%" y2="85%">
+          <stop offset="0%" stopColor="#5347E0" />
+          <stop offset="100%" stopColor="#1FA1E0" />
+        </linearGradient>
+      </defs>
+      <polygon points="210,95 185,78 140,85 70,115 35,140 75,132 130,150 178,108" fill={`url(#${light})`} />
+      <polygon points="140,85 90,25 155,120" fill={`url(#${light})`} />
+      <polygon points="155,120 90,25 120,100" fill={`url(#${dark})`} />
+      <circle cx="190" cy="90" r="3.4" fill="#12131A" />
     </svg>
+  );
+}
+
+export function DoveeWordmark({ className, height = 26 }: { className?: string; height?: number }) {
+  return (
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <DoveeMark size={height} />
+      <span className="font-semibold tracking-tight" style={{ fontSize: Math.round(height * 0.58) }}>
+        dovee
+      </span>
+    </span>
   );
 }
 
@@ -116,33 +137,6 @@ export function Switch({
   );
 }
 
-const EXT_COLOR: Record<string, string> = {
-  ts: "text-teal",
-  tsx: "text-teal",
-  js: "text-gold",
-  jsx: "text-gold",
-  mjs: "text-gold",
-  cjs: "text-gold",
-  json: "text-gold/80",
-  css: "text-teal/70",
-  md: "text-muted",
-  mdx: "text-muted",
-  py: "text-green",
-  rs: "text-rose",
-  go: "text-teal",
-  html: "text-gold",
-  svg: "text-green",
-  png: "text-green",
-  yml: "text-rose/80",
-  yaml: "text-rose/80",
-};
-
-export function FileGlyph({ name }: { name: string }) {
-  const dot = name.lastIndexOf(".");
-  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
-  return <File className={cn("h-4 w-4 shrink-0", EXT_COLOR[ext] ?? "text-muted")} />;
-}
-
 export function Kbd({ children }: { children: ReactNode }) {
   return (
     <kbd className="rounded-md border border-line bg-bg-2 px-1.5 py-0.5 font-mono text-[12px] text-muted shadow-[0_1px_0_var(--line)]">
@@ -166,9 +160,8 @@ function openAgent() {
 export function EditorWelcome() {
   return (
     <div className="welcome-grid flex h-full flex-col items-center justify-center gap-6 px-6 text-center">
-      <DoveeMark size={52} />
+      <DoveeWordmark height={56} />
       <div>
-        <p className="text-xl font-medium tracking-tight">Dovee</p>
         <p className="mt-1.5 max-w-sm text-[14px] leading-relaxed text-muted">
           Open a file from the explorer, or ask the agent to build something.
         </p>

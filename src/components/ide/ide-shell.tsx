@@ -10,8 +10,9 @@ import { useIde } from "@/stores/ide-store";
 import { closeTabSafe, createNewFile, persistAppearance, refreshProblems, saveAll, saveTab } from "./actions";
 import { AgentPanel } from "./agent-panel";
 import { BottomPanel } from "./bottom-panel";
-import { DoveeMark, EditorWelcome, IconButton, StatusSep } from "./chrome";
+import { DoveeWordmark, EditorWelcome, IconButton, StatusSep } from "./chrome";
 import { CommandPalette } from "./command-palette";
+import { FileGlyph } from "./file-icon";
 import { FileTree, refreshRoot } from "./file-tree";
 import { GitPanel } from "./git-panel";
 import { MenuBar } from "./menu-bar";
@@ -158,8 +159,7 @@ export function IdeShell() {
     <div className="flex h-screen flex-col bg-bg text-text">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-bg-1 px-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <DoveeMark size={22} />
-          <span className="hidden text-[13px] font-medium tracking-wide sm:inline">Dovee</span>
+          <DoveeWordmark height={26} />
           <MenuBar />
         </div>
         <div className="min-w-0 flex-1 truncate text-center font-mono text-[12px] text-muted">
@@ -233,6 +233,7 @@ export function IdeShell() {
                         : "border-transparent text-muted hover:bg-hover hover:text-text",
                     )}
                   >
+                    <FileGlyph name={tab.path.split("/").pop() ?? tab.path} />
                     <span className="truncate">{tab.path.split("/").pop()}</span>
                     {dirty && <span className="h-1.5 w-1.5 rounded-full bg-gold" />}
                     <X

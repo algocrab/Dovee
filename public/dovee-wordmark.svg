@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 170" fill="none">
+  <title>Dovee</title>
+  <defs>
+    <linearGradient id="doveGrad" x1="20%" y1="15%" x2="90%" y2="85%">
+      <stop offset="0%" stop-color="#6C63FF"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="doveGradDark" x1="20%" y1="15%" x2="90%" y2="85%">
+      <stop offset="0%" stop-color="#5347E0"/>
+      <stop offset="100%" stop-color="#1FA1E0"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(-5,-2) scale(0.92)">
+    <polygon points="210,95 185,78 140,85 70,115 35,140 75,132 130,150 178,108" fill="url(#doveGrad)"/>
+    <polygon points="140,85 90,25 155,120" fill="url(#doveGrad)"/>
+    <polygon points="155,120 90,25 120,100" fill="url(#doveGradDark)"/>
+    <circle cx="190" cy="90" r="3.4" fill="#12131A"/>
+  </g>
+  <text x="245" y="110" font-family="var(--font-geist-sans), 'Segoe UI', sans-serif" font-weight="600" font-size="76" letter-spacing="-1" fill="currentColor">dovee</text>
+</svg>
