@@ -1,0 +1,102 @@
+@import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+:root {
+  --bg: #09090b;
+  --bg-1: #0e0f14;
+  --bg-2: #13141c;
+  --bg-3: #1a1b25;
+  --line: rgba(232, 228, 220, 0.08);
+  --text: #e8e4dc;
+  --muted: #8b8896;
+  --teal: #7dd3c0;
+  --gold: #e4b86a;
+  --rose: #e07a7a;
+  --green: #86c98a;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-teal: var(--teal);
+  --color-gold: var(--gold);
+  --color-rose: var(--rose);
+  --color-green: var(--green);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(232, 228, 220, 0.12) transparent;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--teal) 35%, transparent);
+}
+
+.xterm {
+  height: 100%;
+  padding: 8px 10px;
+}
+
+.xterm-viewport {
+  background: transparent !important;
+}
+
+.markdown-body p {
+  margin: 0.4em 0;
+}
+
+.markdown-body pre {
+  background: #0a0b10;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.markdown-body code {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.markdown-body :not(pre) > code {
+  background: rgba(125, 211, 192, 0.1);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.2em;
+  margin: 0.4em 0;
+}
+
+.markdown-body a {
+  color: var(--teal);
+}

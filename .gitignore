@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+dist
+.turbo
+.env
+.env.local
+.dovee
+*.log
+.DS_Store
+next-env.d.ts
+
+
+#Ignore cursor AI rules
+.cursor\rules\codacy.mdc
