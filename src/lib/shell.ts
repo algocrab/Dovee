@@ -59,6 +59,34 @@ function terminate(state: ShellState) {
   }
 }
 
+/**
+ * Dovee's own server process leaks private Next/Turbopack env into every user
+ * shell. That makes `npm run dev` inside the integrated terminal run against
+ * the installed app directory, forces NODE_ENV=production, and breaks
+ * `--webpack` with "Multiple bundler flags set". Strip them.
+ */
+const STRIP_ENV = new Set([
+  "NODE_ENV",
+  "PORT",
+  "HOSTNAME",
+  "TURBOPACK",
+  "TURBO_CACHE_DIR",
+  "__NEXT_PRIVATE_ORIGIN",
+  "__NEXT_PRIVATE_STANDALONE_CONFIG",
+  "__NEXT_PRIVATE_RUNTIME_TYPE",
+]);
+
+function shellEnv() {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (STRIP_ENV.has(key) || key.startsWith("__NEXT_PRIVATE_")) continue;
+    env[key] = value;
+  }
+  env.TERM = "xterm-256color";
+  return env;
+}
+
 function spawnShell(id: string, cwd: string, cols = DEFAULT_COLS, rows = DEFAULT_ROWS) {
   const isWin = process.platform === "win32";
   const file = isWin ? "powershell.exe" : process.env.SHELL || "bash";
@@ -69,7 +97,7 @@ function spawnShell(id: string, cwd: string, cols = DEFAULT_COLS, rows = DEFAULT
     cols,
     rows,
     cwd,
-    env: { ...process.env, TERM: "xterm-256color" },
+    env: shellEnv(),
   });
 
   const state: ShellState = {

@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { useCallback, useMemo, useState, type ChangeEvent } from "react";
 import { getProvider, PROVIDERS, type ProviderId } from "@/lib/providers";
+import { MAX_TOOL_ROUNDS_LIMIT, MIN_TOOL_ROUNDS } from "@/lib/tool-rounds";
 import { applyTheme, THEMES, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
 import { persistAppearance } from "./actions";
@@ -32,6 +33,7 @@ function SettingsForm({
   const [wordWrap, setWordWrap] = useState(settings?.wordWrap ?? true);
   const [minimap, setMinimap] = useState(settings?.minimap ?? false);
   const [autoSave, setAutoSave] = useState(settings?.autoSave ?? false);
+  const [maxToolRounds, setMaxToolRounds] = useState(settings?.maxToolRounds ?? 120);
 
   const preset = useMemo(() => getProvider(provider), [provider]);
 
@@ -39,6 +41,10 @@ function SettingsForm({
     const size = Number(event.target.value);
     setEditorFontSize(size);
     void persistAppearance({ editorFontSize: size });
+  }, []);
+
+  const changeMaxToolRounds = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setMaxToolRounds(Number(event.target.value));
   }, []);
 
   function switchProvider(id: ProviderId) {
@@ -61,6 +67,7 @@ function SettingsForm({
         wordWrap,
         minimap,
         autoSave,
+        maxToolRounds,
       };
     if (workspace.trim() && workspace.trim() !== (settings?.workspace ?? "")) {
       payload.workspace = workspace.trim();
@@ -208,6 +215,21 @@ function SettingsForm({
               </select>
             </label>
           )}
+          <label className="mb-3 block text-[13px] text-muted">
+            Max tool rounds ({maxToolRounds})
+            <input
+              type="range"
+              min={MIN_TOOL_ROUNDS}
+              max={MAX_TOOL_ROUNDS_LIMIT}
+              step={8}
+              value={maxToolRounds}
+              onChange={changeMaxToolRounds}
+              className="mt-1 w-full"
+            />
+            <span className="mt-1 block text-[12px] leading-relaxed">
+              Safety cap for one chat turn. Long tasks keep running; the agent only stops early if it starts repeating itself. Open a new chat for new work.
+            </span>
+          </label>
           <p className="text-[12px] text-muted">
             Works with OpenAI-compatible APIs. Custom = any endpoint that speaks `/chat/completions`. Keys stay in{" "}
             <span className="font-mono">~/.dovee/settings.json</span>.

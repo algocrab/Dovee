@@ -8,12 +8,15 @@ import {
   GitBranch,
   Link2,
   List,
+  Minus,
   MoreHorizontal,
+  Plus,
   RefreshCw,
   Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { languageFromPath } from "@/lib/ignore";
 import type { GitCommit, GitFile, GitStatus } from "@/types/git";
 import { useIde } from "@/stores/ide-store";
 import { IconButton } from "./chrome";
@@ -66,6 +69,34 @@ function suggestCommitMessage(files: GitFile[]) {
   return extra === 1 ? `Update ${names[0]} and ${names[1]}` : `Update ${names[0]} and ${extra} more`;
 }
 
+async function openDiff(filePath: string) {
+  try {
+    const res = await fetch(`/api/git?view=diff&path=${encodeURIComponent(filePath)}`);
+    const data = (await res.json()) as {
+      ok?: boolean;
+      path?: string;
+      original?: string;
+      modified?: string;
+      error?: string;
+    };
+    if (!data.ok || !data.path) {
+      useIde.getState().setStatus(data.error || "Could not load diff");
+      return;
+    }
+    const virtual = `diff:${data.path}`;
+    useIde.getState().openTab({
+      path: virtual,
+      sourcePath: data.path,
+      kind: "diff",
+      content: data.modified ?? "",
+      original: data.original ?? "",
+      language: languageFromPath(data.path),
+    });
+  } catch (error) {
+    useIde.getState().setStatus(error instanceof Error ? error.message : String(error));
+  }
+}
+
 export function GitPanel() {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<GitCommit[]>([]);
@@ -76,6 +107,7 @@ export function GitPanel() {
   const [logOk, setLogOk] = useState<boolean | null>(null);
   const [menu, setMenu] = useState<MenuId>(null);
   const [showRemote, setShowRemote] = useState(false);
+  const [openStaged, setOpenStaged] = useState(true);
   const [openChanges, setOpenChanges] = useState(true);
   const [openHistory, setOpenHistory] = useState(true);
   const [showDir, setShowDir] = useState(true);
@@ -125,7 +157,7 @@ export function GitPanel() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  async function run(action: string, extra?: Record<string, string>) {
+  async function run(action: string, extra?: Record<string, unknown>) {
     setBusy(action);
     setLog("");
     setLogOk(null);
@@ -158,12 +190,51 @@ export function GitPanel() {
   const connected = Boolean(status?.remote);
   const ahead = status?.ahead ?? 0;
   const files = status?.files ?? [];
-  const canCommit = Boolean(message.trim()) && files.length > 0 && busy === null;
+  const staged = files.filter((f) => f.staged);
+  const unstaged = files.filter((f) => f.unstaged);
+  const canCommit = Boolean(message.trim()) && staged.length > 0 && busy === null;
   const working = busy !== null;
 
   function commit(kind: "commit" | "commit-push") {
-    if (!message.trim()) return;
+    if (!message.trim() || staged.length === 0) return;
     void run(kind, { message: message.trim() });
+  }
+
+  function FileRow({ file, action }: { file: GitFile; action: "stage" | "unstage" }) {
+    const { name, dir } = splitFilePath(file.path);
+    const letter = statusLetter(file.label);
+    return (
+      <div className="group flex w-full items-center gap-1 py-0.5 pr-1 pl-2 hover:bg-hover">
+        <button
+          type="button"
+          title={file.path}
+          onClick={() => void openDiff(file.path)}
+          onDoubleClick={() => void openFile(file.path)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        >
+          <FileGlyph name={name} />
+          <span className="min-w-0 flex-1 truncate text-[12px]">
+            {name}
+            {showDir && dir ? <span className="ml-1.5 text-[11px] text-muted">{dir}</span> : null}
+          </span>
+          <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", letterClass(letter))}>
+            {letter}
+          </span>
+        </button>
+        <button
+          type="button"
+          title={action === "stage" ? "Stage" : "Unstage"}
+          disabled={working}
+          onClick={(e) => {
+            e.stopPropagation();
+            void run(action, { paths: [file.path] });
+          }}
+          className="shrink-0 rounded p-0.5 text-muted opacity-0 hover:bg-bg-2 hover:text-teal group-hover:opacity-100 disabled:opacity-30"
+        >
+          {action === "stage" ? <Plus className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -181,9 +252,12 @@ export function GitPanel() {
           <List className="h-3.5 w-3.5" />
         </IconButton>
         <IconButton
-          title="All changes are included in the commit"
-          className="p-1"
-          onClick={() => messageRef.current?.focus()}
+          title={unstaged.length ? "Stage all changes" : "Nothing to stage"}
+          className={cn("p-1", (working || unstaged.length === 0) && "opacity-40 pointer-events-none")}
+          onClick={() => {
+            if (working || unstaged.length === 0) return;
+            void run("stage", { paths: unstaged.map((f) => f.path) });
+          }}
         >
           <Check className="h-3.5 w-3.5" />
         </IconButton>
@@ -285,16 +359,20 @@ export function GitPanel() {
                     commit("commit");
                   }
                 }}
-                placeholder="Message (Ctrl+Enter to commit)"
+                placeholder={
+                  staged.length === 0
+                    ? "Stage files to commit"
+                    : "Message (Ctrl+Enter to commit)"
+                }
                 rows={2}
                 className="w-full resize-none rounded-md border border-line bg-bg py-1.5 pr-8 pl-2 text-[12px] outline-none placeholder:text-muted/80"
               />
               <button
                 type="button"
                 title="Generate commit message"
-                disabled={files.length === 0}
+                disabled={staged.length === 0}
                 onClick={() => {
-                  setMessage(suggestCommitMessage(files));
+                  setMessage(suggestCommitMessage(staged));
                   messageRef.current?.focus();
                 }}
                 className="absolute top-1.5 right-1.5 rounded-md p-1 text-muted hover:bg-hover hover:text-teal disabled:opacity-30"
@@ -310,7 +388,7 @@ export function GitPanel() {
                 className="flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-l-md bg-teal text-[12px] font-medium text-bg disabled:opacity-40"
               >
                 <Check className="h-3.5 w-3.5" />
-                {busy === "commit" ? "Committing…" : "Commit"}
+                {busy === "commit" ? "Committing…" : staged.length ? `Commit ${staged.length}` : "Commit"}
               </button>
               <button
                 type="button"
@@ -346,34 +424,59 @@ export function GitPanel() {
 
           <div className="min-h-0 flex-1 overflow-auto">
             <Section
+              open={openStaged}
+              onToggle={() => setOpenStaged((v) => !v)}
+              title="Staged"
+              count={staged.length}
+              action={
+                staged.length > 0 ? (
+                  <button
+                    type="button"
+                    title="Unstage all"
+                    disabled={working}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void run("unstage", { paths: staged.map((f) => f.path) });
+                    }}
+                    className="rounded p-0.5 text-muted hover:bg-hover hover:text-text disabled:opacity-40"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </button>
+                ) : null
+              }
+            >
+              {staged.length === 0 && <p className="px-3 py-2 text-[11px] text-muted">No staged changes.</p>}
+              {staged.map((file) => (
+                <FileRow key={`s:${file.path}`} file={file} action="unstage" />
+              ))}
+            </Section>
+
+            <Section
               open={openChanges}
               onToggle={() => setOpenChanges((v) => !v)}
               title="Changes"
-              count={files.length}
-            >
-              {files.length === 0 && <p className="px-3 py-2 text-[11px] text-muted">Working tree clean.</p>}
-              {files.map((file) => {
-                const { name, dir } = splitFilePath(file.path);
-                const letter = statusLetter(file.label);
-                return (
+              count={unstaged.length}
+              action={
+                unstaged.length > 0 ? (
                   <button
-                    key={file.path}
                     type="button"
-                    title={file.path}
-                    onClick={() => void openFile(file.path)}
-                    className="flex w-full items-center gap-1.5 py-0.5 pr-2 pl-2 text-left hover:bg-hover"
+                    title="Stage all"
+                    disabled={working}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void run("stage", { paths: unstaged.map((f) => f.path) });
+                    }}
+                    className="rounded p-0.5 text-muted hover:bg-hover hover:text-text disabled:opacity-40"
                   >
-                    <FileGlyph name={name} />
-                    <span className="min-w-0 flex-1 truncate text-[12px]">
-                      {name}
-                      {showDir && dir ? <span className="ml-1.5 text-[11px] text-muted">{dir}</span> : null}
-                    </span>
-                    <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", letterClass(letter))}>
-                      {letter}
-                    </span>
+                    <Plus className="h-3 w-3" />
                   </button>
-                );
-              })}
+                ) : null
+              }
+            >
+              {unstaged.length === 0 && <p className="px-3 py-2 text-[11px] text-muted">Working tree clean.</p>}
+              {unstaged.map((file) => (
+                <FileRow key={`u:${file.path}`} file={file} action="stage" />
+              ))}
             </Section>
 
             <Section open={openHistory} onToggle={() => setOpenHistory((v) => !v)} title="History" count={commits.length}>
@@ -435,21 +538,26 @@ function Section({
   onToggle,
   title,
   count,
+  action,
   children,
 }: {
   open: boolean;
   onToggle: () => void;
   title: string;
   count?: number;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section>
-      <button type="button" onClick={onToggle} className="flex w-full items-center gap-1 px-2 py-1 text-muted hover:text-text">
-        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        <span className="text-[11px]">{title}</span>
-        {count ? <span className="ml-auto font-mono text-[11px]">{count}</span> : null}
-      </button>
+      <div className="flex w-full items-center gap-1 px-2 py-1 text-muted">
+        <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-1 hover:text-text">
+          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          <span className="text-[11px]">{title}</span>
+          {count ? <span className="ml-auto font-mono text-[11px]">{count}</span> : null}
+        </button>
+        {action}
+      </div>
       {open ? children : null}
     </section>
   );

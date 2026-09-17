@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ThemeId } from "@/lib/theme";
-import type { AgentChat, ChatAttachment, ChatMsg, ToolCard } from "@/types/chat";
+import type { AgentChat, ChatAttachment, ChatMsg, ChatUsage, ToolCard } from "@/types/chat";
 
 export type TreeEntry = { name: string; path: string; type: "file" | "dir" };
 
@@ -9,9 +9,13 @@ export type Tab = {
   content: string;
   original: string;
   language: string;
+  /** "diff" tabs are read-only side-by-side views opened from the git panel. */
+  kind?: "file" | "diff";
+  /** Real workspace path when `path` is a virtual diff URI like `diff:src/foo.ts`. */
+  sourcePath?: string;
 };
 
-export type { AgentChat, ChatAttachment, ChatMsg, ToolCard };
+export type { AgentChat, ChatAttachment, ChatMsg, ChatUsage, ToolCard };
 
 export type TermTab = {
   id: string;
@@ -32,6 +36,7 @@ export type PublicSettings = {
   wordWrap: boolean;
   minimap: boolean;
   autoSave: boolean;
+  maxToolRounds: number;
 };
 
 export type Problem = {
@@ -122,6 +127,7 @@ type IdeState = {
   appendContent: (chatId: string, text: string) => void;
   startTool: (chatId: string, card: ToolCard) => void;
   finishTool: (chatId: string, id: string, ok: boolean, output: string) => void;
+  setMessageUsage: (chatId: string, usage: ChatUsage) => void;
   setChatStreaming: (chatId: string, v: boolean) => void;
   setStatus: (s: string) => void;
   addTerminal: () => string;
@@ -322,6 +328,17 @@ export const useIde = create<IdeState>((set, get) => ({
               t.id === id ? { ...t, ok, output, status: ok ? "done" : "error" } : t,
             ),
           };
+        }
+        return { ...c, messages };
+      }),
+    })),
+  setMessageUsage: (chatId, usage) =>
+    set((s) => ({
+      chats: patchChat(s.chats, chatId, (c) => {
+        const messages = [...c.messages];
+        const last = messages[messages.length - 1];
+        if (last?.role === "assistant") {
+          messages[messages.length - 1] = { ...last, usage };
         }
         return { ...c, messages };
       }),

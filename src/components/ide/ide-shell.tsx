@@ -211,7 +211,9 @@ export function IdeShell() {
 
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!useIde.getState().tabs.some((tab) => tab.content !== tab.original)) return;
+      if (!useIde.getState().tabs.some((tab) => tab.kind !== "diff" && tab.content !== tab.original)) {
+        return;
+      }
       e.preventDefault();
       e.returnValue = "";
     };
@@ -294,8 +296,9 @@ export function IdeShell() {
           {tabs.length > 0 && (
             <div className="flex h-9 items-center gap-0.5 overflow-x-auto border-b border-line bg-bg-1 px-1">
               {tabs.map((tab) => {
-                const dirty = tab.content !== tab.original;
+                const dirty = tab.kind !== "diff" && tab.content !== tab.original;
                 const active = tab.path === activePath;
+                const label = (tab.sourcePath ?? tab.path).split("/").pop() ?? tab.path;
                 return (
                   <button
                     key={tab.path}
@@ -308,8 +311,13 @@ export function IdeShell() {
                         : "border-transparent text-muted hover:bg-hover hover:text-text",
                     )}
                   >
-                    <FileGlyph name={tab.path.split("/").pop() ?? tab.path} />
-                    <span className="truncate">{tab.path.split("/").pop()}</span>
+                    <FileGlyph name={label} />
+                    <span className="truncate">
+                      {tab.kind === "diff" ? (
+                        <span className="text-muted">diff · </span>
+                      ) : null}
+                      {label}
+                    </span>
                     {dirty && <span className="h-1.5 w-1.5 rounded-full bg-gold" />}
                     <X
                       className={cn(

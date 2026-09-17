@@ -3,6 +3,8 @@ export type GitFile = {
   index: string;
   worktree: string;
   label: string;
+  staged: boolean;
+  unstaged: boolean;
 };
 
 export type GitCommit = {

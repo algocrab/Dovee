@@ -1,12 +1,22 @@
 "use client";
 
 import { Loader2, Paperclip, Plus, Square, WandSparkles, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type MutableRefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
+  type MutableRefObject,
+} from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/cn";
 import { ACCEPT_FILES, filesToAttachments, userApiContent } from "@/lib/chat-attachments";
-import { useIde, type ChatAttachment, type ChatMsg, type ToolCard } from "@/stores/ide-store";
+import { formatUsage } from "@/lib/llm";
+import { useIde, type ChatAttachment, type ChatMsg, type ChatUsage, type ToolCard } from "@/stores/ide-store";
 import { openFile, refreshRoot } from "./file-tree";
 
 function ToolRow({ tool }: { tool: ToolCard }) {
@@ -27,7 +37,9 @@ function ToolRow({ tool }: { tool: ToolCard }) {
           )}
         />
         <span className="text-gold">{tool.name}</span>
-        <span className="min-w-0 flex-1 truncate text-muted">{tool.arguments.replace(/\s+/g, " ").slice(0, 80)}</span>
+        <span className="min-w-0 flex-1 truncate text-muted">
+          {tool.arguments.replace(/\s+/g, " ").slice(0, 80)}
+        </span>
       </button>
       {open && tool.output && (
         <pre className="max-h-48 overflow-auto border-t border-line px-2.5 py-2 font-mono text-[10px] text-muted whitespace-pre-wrap">
@@ -56,17 +68,28 @@ function ToolSummary({ tools }: { tools: ToolCard[] }) {
         onClick={() => setOpen((value) => !value)}
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] text-muted hover:bg-hover"
       >
-        <span className={cn("h-1.5 w-1.5 rounded-full", running ? "animate-pulse bg-gold" : errors ? "bg-rose" : "bg-green")} />
+        <span
+          className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            running ? "animate-pulse bg-gold" : errors ? "bg-rose" : "bg-green",
+          )}
+        />
         <span className="truncate">{running ? "Working in the background" : parts.join(" · ")}</span>
         <span className="ml-auto shrink-0 font-mono text-[10px] text-muted/70">{open ? "hide" : "show"}</span>
       </button>
       {open && (
         <div className="space-y-1 border-t border-line/70 p-1.5">
-          {tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}
+          {tools.map((tool) => (
+            <ToolRow key={tool.id} tool={tool} />
+          ))}
         </div>
       )}
     </div>
   );
+}
+
+function fmtTok(n: number) {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n);
 }
 
 function Message({ msg }: { msg: ChatMsg }) {
@@ -111,6 +134,17 @@ function Message({ msg }: { msg: ChatMsg }) {
           <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
         </div>
       )}
+      {msg.usage && (msg.usage.total_tokens || msg.usage.cost_usd != null) ? (
+        <p
+          className="font-mono text-[10px] text-muted/80"
+          title="Tokens and cost for this turn (all tool rounds summed)"
+        >
+          {formatUsage(msg.usage, { estimated: Boolean(msg.usage.estimated) })}
+          {msg.usage.prompt_tokens != null && msg.usage.completion_tokens != null
+            ? ` · in ${fmtTok(msg.usage.prompt_tokens)} / out ${fmtTok(msg.usage.completion_tokens)}`
+            : null}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -148,7 +182,6 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
     el.setSelectionRange(el.value.length, el.value.length);
   }, [focusToken]);
 
-
   useEffect(() => {
     if (!stickToBottom.current) return;
     const element = scroller.current;
@@ -181,39 +214,74 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
 
     const history: Array<Record<string, unknown>> = [];
     const after = useIde.getState().chats.find((c) => c.id === chatId);
-    // Keep the prompt bounded: recent turns are more useful than replaying a
-    // large tool transcript on every request.
-    for (const m of (after?.messages ?? []).slice(-24, -1)) {
+    // Keep the prompt bounded: recent turns beat a full tool transcript replay.
+    // Last message is the empty assistant placeholder — exclude it.
+    const prior = (after?.messages ?? []).slice(0, -1);
+    const windowed = prior.slice(-12);
+    // Only the newest assistant turns keep tool transcripts.
+    const toolKeepFrom = Math.max(0, windowed.length - 4);
+
+    for (let index = 0; index < windowed.length; index++) {
+      const m = windowed[index];
       if (m.role === "user") {
-        history.push({ role: "user", content: userApiContent(m.content, m.attachments) });
+        // Base64 images are huge — only re-send them on the latest user turn.
+        const isLatestUser = !windowed.slice(index + 1).some((x) => x.role === "user");
+        if (isLatestUser) {
+          history.push({ role: "user", content: userApiContent(m.content, m.attachments) });
+        } else {
+          const textOnly = (m.attachments ?? []).filter((a) => a.kind === "text");
+          const imageNames = (m.attachments ?? []).filter((a) => a.kind === "image").map((a) => a.name);
+          let content = userApiContent(m.content, textOnly);
+          if (imageNames.length) {
+            const note = `[Earlier message included image(s): ${imageNames.join(", ")}]`;
+            content = typeof content === "string" ? (content ? `${content}\n\n${note}` : note) : content;
+          }
+          history.push({ role: "user", content });
+        }
         continue;
       }
-      const toolCalls = m.tools
-        .filter((t) => t.id && t.name)
-        .map((t) => ({
-          id: t.id,
-          type: "function" as const,
-          function: { name: t.name, arguments: t.arguments || "{}" },
-        }));
-      if (!m.content && toolCalls.length === 0) continue;
+
+      const includeTools = index >= toolKeepFrom;
+      const toolCalls = includeTools
+        ? m.tools
+            .filter((t) => t.id && t.name)
+            .map((t) => ({
+              id: t.id,
+              type: "function" as const,
+              function: { name: t.name, arguments: t.arguments || "{}" },
+            }))
+        : [];
+
+      if (!m.content && toolCalls.length === 0) {
+        if (!includeTools && m.tools.length) {
+          history.push({
+            role: "assistant",
+            content: `[Completed ${m.tools.length} tool call(s) in an earlier turn.]`,
+          });
+        }
+        continue;
+      }
+
       history.push({
         role: "assistant",
         content: m.content || (toolCalls.length ? null : ""),
-        ...(m.thinking ? { reasoning_content: m.thinking } : {}),
+        // Thinking traces are large and rarely help on later turns.
         ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
       });
+      if (!includeTools) continue;
       for (const t of m.tools) {
         if (t.output === undefined) continue;
         history.push({
           role: "tool",
           tool_call_id: t.id,
-          content: t.output.length > 1200 ? `${t.output.slice(0, 1100)}\n[…output truncated]` : t.output,
+          content: t.output.length > 800 ? `${t.output.slice(0, 700)}\n[…output truncated]` : t.output,
         });
       }
     }
 
     const controller = new AbortController();
     abortRef.current.set(chatId, controller);
+    let turnUsage: ChatUsage | undefined;
 
     try {
       const res = await fetch("/api/agent", {
@@ -272,7 +340,12 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
             s.appendContent(chatId, `\n\n**Error:** ${String(data.message)}`);
             s.setStatus(String(data.message));
           }
-          if (ev === "done") s.setStatus("Ready");
+          if (ev === "done") {
+            const raw = data.usage as ChatUsage | undefined;
+            if (raw && (raw.total_tokens || raw.prompt_tokens || raw.cost_usd != null)) {
+              turnUsage = raw;
+            }
+          }
         }
       }
     } catch (error) {
@@ -281,8 +354,15 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
       }
     } finally {
       abortRef.current.delete(chatId);
-      useIde.getState().setChatStreaming(chatId, false);
-      useIde.getState().setStatus("Ready");
+      const s = useIde.getState();
+      s.setChatStreaming(chatId, false);
+      if (turnUsage) {
+        s.setMessageUsage(chatId, turnUsage);
+        const label = formatUsage(turnUsage, { estimated: Boolean(turnUsage.estimated) });
+        s.setStatus(label ? `Ready · ${label}` : "Ready");
+      } else if (s.status === "Dovee is working…" || s.status.startsWith("Ready")) {
+        s.setStatus("Ready");
+      }
     }
   }
 
@@ -468,6 +548,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
             </div>
           )}
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(e) => useIde.getState().setDraft(activeChatId, e.target.value)}
             onPaste={onPaste}

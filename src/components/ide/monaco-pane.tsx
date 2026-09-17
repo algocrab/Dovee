@@ -1,6 +1,6 @@
 "use client";
 
-import Editor, { loader, type OnMount } from "@monaco-editor/react";
+import Editor, { DiffEditor, loader, type OnMount } from "@monaco-editor/react";
 import type { languages } from "monaco-editor";
 import { useEffect, useRef, useState } from "react";
 import { MONACO_THEME, type ThemeId } from "@/lib/theme";
@@ -19,36 +19,100 @@ type TypeResponse = {
   stats?: { packages: number; files: number; bytes: number; skipped: number };
 };
 
-let typeRequest: Promise<TypeResponse> | null = null;
-let typeLibsApplied = false;
+const loadedPackages = new Set<string>();
+const loadedLibPaths = new Set<string>();
+let baseTypesPromise: Promise<TypeResponse> | null = null;
+let baseTypesReady = false;
 
-function fetchTypeLibs() {
-  if (!typeRequest) {
-    typeRequest = fetch("/api/types")
+/** Same rules as the server-side extractor — keep them in sync. */
+function extractPackageImports(source: string): string[] {
+  const found = new Set<string>();
+  const re =
+    /(?:import|export)(?:[\s\S]*?from\s*|[\s]*|[\s]+type[\s\S]*?from\s*)["']([^"']+)["']|require\(\s*["']([^"']+)["']\s*\)|import\(\s*["']([^"']+)["']\s*\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source))) {
+    const spec = match[1] || match[2] || match[3];
+    if (!spec) continue;
+    if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("@/")) continue;
+    const pkg = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
+    if (pkg) found.add(pkg);
+  }
+  return [...found];
+}
+
+function applyLibs(monaco: Parameters<OnMount>[1], libs: { path: string; text: string }[]) {
+  const defaults = monaco.languages.typescript.typescriptDefaults;
+  const jsDefaults = monaco.languages.typescript.javascriptDefaults;
+  for (const lib of libs) {
+    if (loadedLibPaths.has(lib.path)) continue;
+    loadedLibPaths.add(lib.path);
+    defaults.addExtraLib(lib.text, lib.path);
+    jsDefaults.addExtraLib(lib.text, lib.path);
+  }
+}
+
+async function ensureBaseTypes(monaco: Parameters<OnMount>[1]) {
+  if (baseTypesReady) return;
+  if (!baseTypesPromise) {
+    baseTypesPromise = fetch("/api/types")
       .then((res) => res.json() as Promise<TypeResponse>)
       .catch(() => {
-        typeRequest = null;
+        baseTypesPromise = null;
         return { ok: false } as TypeResponse;
       });
   }
-  return typeRequest;
-}
-
-// Feed the workspace's type definitions to Monaco's TS worker. Without this the worker
-// only knows the open buffer, so dependency imports get no completions or hover docs.
-async function loadTypeLibs(monaco: Parameters<OnMount>[1]) {
-  if (typeLibsApplied) return;
-  const data = await fetchTypeLibs();
+  const data = await baseTypesPromise;
   if (!data.ok) return;
   const defaults = monaco.languages.typescript.typescriptDefaults;
+  const jsDefaults = monaco.languages.typescript.javascriptDefaults;
   if (data.compilerOptions) {
-    defaults.setCompilerOptions({ ...data.compilerOptions, allowNonTsExtensions: true });
+    const opts = { ...data.compilerOptions, allowNonTsExtensions: true };
+    defaults.setCompilerOptions(opts);
+    jsDefaults.setCompilerOptions(opts);
   }
-  for (const lib of data.libs ?? []) {
-    defaults.addExtraLib(lib.text, lib.path);
-  }
+  applyLibs(monaco, data.libs ?? []);
   defaults.setEagerModelSync(true);
-  typeLibsApplied = true;
+  jsDefaults.setEagerModelSync(true);
+  // Essentials are already in the base bundle.
+  for (const name of ["@types/node", "@types/react", "@types/react-dom", "csstype", "react", "react-dom"]) {
+    loadedPackages.add(name);
+  }
+  baseTypesReady = true;
+}
+
+async function loadPackageTypes(monaco: Parameters<OnMount>[1], packages: string[]) {
+  const needed = packages.filter((name) => !loadedPackages.has(name));
+  if (needed.length === 0) return;
+  // Mark eagerly so concurrent scans do not re-request the same package.
+  for (const name of needed) loadedPackages.add(name);
+  try {
+    const res = await fetch("/api/types", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packages: needed }),
+    });
+    const data = (await res.json()) as TypeResponse;
+    if (!data.ok) {
+      for (const name of needed) loadedPackages.delete(name);
+      return;
+    }
+    applyLibs(monaco, data.libs ?? []);
+  } catch {
+    for (const name of needed) loadedPackages.delete(name);
+  }
+}
+
+// Base types on mount, then on-demand package types from the open buffer's imports.
+// That keeps the initial payload small (~project + React/Node) instead of every
+// dependency's .d.ts (which was 13 MB for this repo alone).
+async function loadTypeLibs(monaco: Parameters<OnMount>[1]) {
+  await ensureBaseTypes(monaco);
+}
+
+function schedulePackageScan(monaco: Parameters<OnMount>[1], source: string) {
+  const packages = extractPackageImports(source);
+  if (packages.length === 0) return;
+  void loadPackageTypes(monaco, packages);
 }
 
 function appearanceOptions(fontSize: number, wordWrap: boolean, minimap: boolean) {
@@ -146,6 +210,18 @@ export function MonacoPane() {
     pathRef.current = tab?.path ?? null;
   }, [tab?.path]);
 
+  // Whenever the active buffer changes (tab switch or edit), pull types for any
+  // new bare imports it references. Already-loaded packages are a no-op.
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco || !tab) return;
+    if (tab.kind === "diff") return;
+    const content = tab.content;
+    void ensureBaseTypes(monaco).then(() => {
+      schedulePackageScan(monaco, content);
+    });
+  }, [tab]);
+
   useEffect(() => {
     monacoRef.current?.editor.setTheme(MONACO_THEME[theme]);
   }, [theme]);
@@ -162,7 +238,11 @@ export function MonacoPane() {
     defineThemes(monaco);
     monaco.editor.setTheme(MONACO_THEME[theme]);
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
-    void loadTypeLibs(monaco);
+    void loadTypeLibs(monaco).then(() => {
+      const model = editor.getModel();
+      if (model) schedulePackageScan(monaco, model.getValue());
+    });
+
     const showSelectionAction = () => {
       const selection = editor.getSelection();
       const model = editor.getModel();
@@ -201,6 +281,7 @@ export function MonacoPane() {
         label,
       });
     };
+
     editor.onDidChangeCursorSelection(showSelectionAction);
     editor.onDidScrollChange(() => setSpot(null));
     editor.onDidChangeCursorPosition((e) => {
@@ -215,6 +296,30 @@ export function MonacoPane() {
 
   if (!tab) {
     return <EditorWelcome />;
+  }
+
+  if (tab.kind === "diff") {
+    return (
+      <DiffEditor
+        key={tab.path}
+        height="100%"
+        theme={MONACO_THEME[theme]}
+        language={tab.language}
+        original={tab.original}
+        modified={tab.content}
+        options={{
+          readOnly: true,
+          renderSideBySide: true,
+          originalEditable: false,
+          fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
+          ...appearanceOptions(fontSize, wordWrap, minimap),
+          scrollBeyondLastLine: false,
+          automaticLayout: true,
+          padding: { top: 12 },
+          renderOverviewRuler: false,
+        }}
+      />
+    );
   }
 
   return (

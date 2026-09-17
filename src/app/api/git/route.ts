@@ -1,5 +1,17 @@
 import { NextResponse } from "next/server";
-import { gitCommit, gitCommitAndPush, gitInit, gitLog, gitPull, gitPush, gitSetRemote, gitStatus } from "@/lib/git";
+import {
+  gitCommit,
+  gitCommitAndPush,
+  gitFileDiff,
+  gitInit,
+  gitLog,
+  gitPull,
+  gitPush,
+  gitSetRemote,
+  gitStage,
+  gitStatus,
+  gitUnstage,
+} from "@/lib/git";
 
 export async function GET(req: Request) {
   const view = new URL(req.url).searchParams.get("view") || "status";
@@ -7,6 +19,11 @@ export async function GET(req: Request) {
     if (view === "log") {
       const commits = await gitLog(50);
       return NextResponse.json({ commits });
+    }
+    if (view === "diff") {
+      const file = new URL(req.url).searchParams.get("path");
+      if (!file) return NextResponse.json({ error: "path required" }, { status: 400 });
+      return NextResponse.json(await gitFileDiff(file));
     }
     const status = await gitStatus();
     return NextResponse.json(status);
@@ -23,24 +40,33 @@ export async function POST(req: Request) {
     action?: string;
     message?: string;
     url?: string;
+    paths?: string[];
   };
   try {
     if (body.action === "init") return NextResponse.json(await gitInit());
+    if (body.action === "stage") return NextResponse.json(await gitStage(body.paths ?? []));
+    if (body.action === "unstage") return NextResponse.json(await gitUnstage(body.paths ?? []));
     if (body.action === "commit") {
       const message = body.message?.trim();
-      if (!message) return NextResponse.json({ ok: false, stderr: "Commit message required" }, { status: 400 });
+      if (!message) {
+        return NextResponse.json({ ok: false, stderr: "Commit message required" }, { status: 400 });
+      }
       return NextResponse.json(await gitCommit(message));
     }
     if (body.action === "push") return NextResponse.json(await gitPush());
     if (body.action === "commit-push") {
       const message = body.message?.trim();
-      if (!message) return NextResponse.json({ ok: false, stderr: "Commit message required" }, { status: 400 });
+      if (!message) {
+        return NextResponse.json({ ok: false, stderr: "Commit message required" }, { status: 400 });
+      }
       return NextResponse.json(await gitCommitAndPush(message));
     }
     if (body.action === "pull") return NextResponse.json(await gitPull());
     if (body.action === "remote") {
       const url = body.url?.trim();
-      if (!url) return NextResponse.json({ ok: false, stderr: "Remote URL required" }, { status: 400 });
+      if (!url) {
+        return NextResponse.json({ ok: false, stderr: "Remote URL required" }, { status: 400 });
+      }
       return NextResponse.json(await gitSetRemote(url));
     }
     return NextResponse.json({ ok: false, stderr: "Unknown action" }, { status: 400 });

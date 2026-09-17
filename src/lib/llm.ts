@@ -20,16 +20,24 @@ export type ToolCall = {
   function: { name: string; arguments: string };
 };
 
+export type TokenUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  /** Prompt tokens served from cache (when the provider reports it). */
+  cached_tokens?: number;
+  /** Actual or estimated billed USD for this call / turn. */
+  cost_usd?: number;
+  /** True when cost_usd is from the local rate card, not the provider invoice. */
+  estimated?: boolean;
+};
+
 export type StreamDelta = {
   reasoning?: string;
   content?: string;
   toolCalls?: ToolCall[];
   finishReason?: string | null;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
+  usage?: TokenUsage;
 };
 
 type AccumTool = { id: string; name: string; arguments: string };
@@ -147,7 +155,17 @@ async function* parseOpenAiStream(response: Response): AsyncGenerator<StreamDelt
       }
 
       let parsed: {
-        usage?: StreamDelta["usage"];
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+          cost?: number;
+          cost_in_usd?: number;
+          cost_in_usd_ticks?: number;
+          prompt_tokens_details?: { cached_tokens?: number };
+          prompt_cache_hit_tokens?: number;
+          cached_tokens?: number;
+        };
         choices?: Array<{
           finish_reason?: string | null;
           delta?: {
@@ -189,7 +207,7 @@ async function* parseOpenAiStream(response: Response): AsyncGenerator<StreamDelt
         out.finishReason = choice.finish_reason;
         out.toolCalls = flushTools();
       }
-      if (parsed.usage) out.usage = parsed.usage;
+      if (parsed.usage) out.usage = normalizeUsage(parsed.usage);
       if (out.reasoning || out.content || out.finishReason || out.usage || out.toolCalls) {
         yield out;
       }
@@ -274,17 +292,19 @@ async function* streamAnthropic(options: {
     input_schema: t.function.parameters || { type: "object", properties: {} },
   }));
 
+  const body: Record<string, unknown> = {
+    model: options.settings.model,
+    max_tokens: 16384,
+    system,
+    messages: toAnthropicMessages(options.messages),
+    stream: true,
+  };
+  if (tools.length) body.tools = tools;
+
   const response = await fetch(`${options.settings.baseUrl.replace(/\/$/, "")}/v1/messages`, {
     method: "POST",
     headers: extraHeaders("anthropic", options.settings.apiKey),
-    body: JSON.stringify({
-      model: options.settings.model,
-      max_tokens: 16384,
-      system,
-      messages: toAnthropicMessages(options.messages),
-      tools,
-      stream: true,
-    }),
+    body: JSON.stringify(body),
     signal: options.signal,
   });
 
@@ -353,6 +373,109 @@ async function* streamAnthropic(options: {
   }
 }
 
+
+/** Normalize provider-specific usage payloads into a single shape. */
+export function normalizeUsage(raw: {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cost?: number;
+  cost_in_usd?: number;
+  cost_in_usd_ticks?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  prompt_cache_hit_tokens?: number;
+  cached_tokens?: number;
+}): TokenUsage {
+  const prompt = num(raw.prompt_tokens);
+  const completion = num(raw.completion_tokens);
+  const cached =
+    num(raw.cached_tokens) ??
+    num(raw.prompt_cache_hit_tokens) ??
+    num(raw.prompt_tokens_details?.cached_tokens);
+  const total = num(raw.total_tokens) ?? ((prompt ?? 0) + (completion ?? 0) || undefined);
+
+  // xAI documents cost_in_usd_ticks as 1 tick = $1e-8. Prefer explicit USD fields first.
+  const cost_usd =
+    num(raw.cost_in_usd) ??
+    num(raw.cost) ??
+    (raw.cost_in_usd_ticks != null ? num(raw.cost_in_usd_ticks)! / 1e8 : undefined);
+
+  const usage: TokenUsage = {};
+  if (prompt != null) usage.prompt_tokens = prompt;
+  if (completion != null) usage.completion_tokens = completion;
+  if (total != null) usage.total_tokens = total;
+  if (cached != null) usage.cached_tokens = cached;
+  if (cost_usd != null && Number.isFinite(cost_usd)) usage.cost_usd = cost_usd;
+  return usage;
+}
+
+export function addUsage(a?: TokenUsage, b?: TokenUsage): TokenUsage | undefined {
+  if (!a && !b) return undefined;
+  const out: TokenUsage = {
+    prompt_tokens: (a?.prompt_tokens ?? 0) + (b?.prompt_tokens ?? 0),
+    completion_tokens: (a?.completion_tokens ?? 0) + (b?.completion_tokens ?? 0),
+    total_tokens: (a?.total_tokens ?? 0) + (b?.total_tokens ?? 0),
+    cached_tokens: (a?.cached_tokens ?? 0) + (b?.cached_tokens ?? 0),
+  };
+  const cost = (a?.cost_usd ?? 0) + (b?.cost_usd ?? 0);
+  if (cost > 0) out.cost_usd = cost;
+  if (!out.prompt_tokens && !out.completion_tokens && !out.total_tokens) return a ?? b;
+  return out;
+}
+
+/** Rough USD estimate when the provider does not return a billed cost. */
+export function estimateCostUsd(
+  providerId: string,
+  usage: TokenUsage | undefined,
+): number | undefined {
+  if (!usage) return undefined;
+  if (usage.cost_usd != null && Number.isFinite(usage.cost_usd)) return usage.cost_usd;
+  const prompt = usage.prompt_tokens ?? 0;
+  const completion = usage.completion_tokens ?? 0;
+  const cached = Math.min(usage.cached_tokens ?? 0, prompt);
+  const fresh = Math.max(0, prompt - cached);
+  // $/1M tokens — close enough for a status-bar meter, not an invoice.
+  const rates: Record<string, { in: number; out: number; cache: number }> = {
+    xai: { in: 2, out: 6, cache: 0.5 },
+    openai: { in: 2.5, out: 10, cache: 1.25 },
+    deepseek: { in: 0.27, out: 1.1, cache: 0.07 },
+    anthropic: { in: 3, out: 15, cache: 0.3 },
+    google: { in: 1.25, out: 5, cache: 0.315 },
+    groq: { in: 0.59, out: 0.79, cache: 0.59 },
+    openrouter: { in: 2, out: 6, cache: 0.5 },
+    mistral: { in: 2, out: 6, cache: 0.5 },
+    together: { in: 0.88, out: 0.88, cache: 0.88 },
+  };
+  const rate = rates[providerId] ?? { in: 2, out: 6, cache: 0.5 };
+  const usd = (fresh * rate.in + cached * rate.cache + completion * rate.out) / 1_000_000;
+  return usd > 0 ? usd : undefined;
+}
+
+export function formatUsage(usage: TokenUsage | undefined, opts?: { estimated?: boolean }): string {
+  if (!usage) return "";
+  const total = usage.total_tokens ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0);
+  if (!total && usage.cost_usd == null) return "";
+  const parts: string[] = [];
+  if (total) {
+    parts.push(total >= 1000 ? `${(total / 1000).toFixed(total >= 10_000 ? 0 : 1)}k tok` : `${total} tok`);
+  }
+  if (usage.cost_usd != null && usage.cost_usd > 0) {
+    const prefix = opts?.estimated ? "~$" : "$";
+    parts.push(
+      usage.cost_usd < 0.01
+        ? `${prefix}${usage.cost_usd.toFixed(4)}`
+        : `${prefix}${usage.cost_usd.toFixed(3)}`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+function num(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return undefined;
+}
+
 export async function* streamChat(options: {
   settings: DoveeSettings;
   messages: ChatMessage[];
@@ -381,11 +504,13 @@ export async function* streamChat(options: {
   const body: Record<string, unknown> = {
     model: options.settings.model,
     messages,
-    tools,
-    tool_choice: "auto",
     stream: true,
     stream_options: { include_usage: true },
   };
+  if (tools.length) {
+    body.tools = tools;
+    body.tool_choice = "auto";
+  }
   if (provider.id === "deepseek") {
     body.thinking = { type: thinkingEnabled ? "enabled" : "disabled" };
     if (thinkingEnabled) body.reasoning_effort = options.settings.reasoningEffort;

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { getProvider, type ProviderId } from "./providers";
 import type { ThemeId } from "./theme";
+import { clampMaxToolRounds, DEFAULT_MAX_TOOL_ROUNDS } from "./tool-rounds";
 
 export type ReasoningEffort = "none" | "low" | "high" | "max";
 
@@ -21,6 +22,7 @@ export type DoveeSettings = {
   wordWrap: boolean;
   minimap: boolean;
   autoSave: boolean;
+  maxToolRounds: number;
 };
 
 const SETTINGS_DIR = path.join(os.homedir(), ".dovee");
@@ -108,6 +110,7 @@ const DEFAULTS: DoveeSettings = {
   wordWrap: true,
   minimap: false,
   autoSave: false,
+  maxToolRounds: DEFAULT_MAX_TOOL_ROUNDS,
 };
 
 function envKey(provider: string) {
@@ -166,6 +169,7 @@ export async function loadSettings(): Promise<DoveeSettings> {
     wordWrap: typeof stored.wordWrap === "boolean" ? stored.wordWrap : DEFAULTS.wordWrap,
     minimap: typeof stored.minimap === "boolean" ? stored.minimap : DEFAULTS.minimap,
     autoSave: typeof stored.autoSave === "boolean" ? stored.autoSave : DEFAULTS.autoSave,
+    maxToolRounds: clampMaxToolRounds(stored.maxToolRounds),
   };
 }
 
@@ -173,6 +177,7 @@ export async function saveSettings(patch: Partial<DoveeSettings>) {
   const stored = await readStored();
   const current = await loadSettings();
   const next: DoveeSettings = { ...current, ...patch };
+  next.maxToolRounds = clampMaxToolRounds(next.maxToolRounds);
   if (patch.apiKey !== undefined) {
     next.apiKeys = { ...current.apiKeys, [next.provider]: patch.apiKey };
     next.apiKey = patch.apiKey;
@@ -219,5 +224,6 @@ export function publicSettings(settings: DoveeSettings) {
     wordWrap: settings.wordWrap,
     minimap: settings.minimap,
     autoSave: settings.autoSave,
+    maxToolRounds: settings.maxToolRounds,
   };
 }

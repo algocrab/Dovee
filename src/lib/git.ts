@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 import type { GitCommit, GitFile, GitStatus } from "@/types/git";
 import { getWorkspaceRoot } from "./workspace";
@@ -56,6 +58,15 @@ function labelFor(index: string, worktree: string) {
   return `${index}${worktree}`.trim() || "changed";
 }
 
+function isStaged(index: string) {
+  return index !== "." && index !== "?" && index !== " ";
+}
+
+function isUnstaged(index: string, worktree: string) {
+  if (index === "?" && worktree === "?") return true;
+  return worktree !== "." && worktree !== " ";
+}
+
 export async function gitStatus(): Promise<GitStatus> {
   const cwd = await getWorkspaceRoot();
   const inside = await git(["rev-parse", "--is-inside-work-tree"], cwd);
@@ -91,12 +102,14 @@ export async function gitStatus(): Promise<GitStatus> {
     const index = line[0] === " " ? "." : line[0];
     const worktree = line[1] === " " ? "." : line[1];
     const raw = line.slice(3);
-    const path = raw.includes(" -> ") ? raw.split(" -> ").pop()! : raw;
+    const filePath = raw.includes(" -> ") ? raw.split(" -> ").pop()! : raw;
     files.push({
-      path,
+      path: filePath,
       index,
       worktree,
       label: labelFor(index, worktree),
+      staged: isStaged(index),
+      unstaged: isUnstaged(index, worktree),
     });
   }
 
@@ -143,9 +156,62 @@ export async function gitInit() {
 
 export async function gitCommit(message: string) {
   const cwd = await getWorkspaceRoot();
-  const add = await git(["add", "-A"], cwd);
-  if (!add.ok) return add;
+  // Commit only what is already staged. Callers stage files explicitly so a
+  // half-finished edit is never silently swept into the commit.
+  const staged = await git(["diff", "--cached", "--name-only"], cwd);
+  if (!staged.ok) return staged;
+  if (!staged.stdout.trim()) {
+    return { ok: false as const, stdout: "", stderr: "Nothing staged. Stage files before committing." };
+  }
   return git(["commit", "-m", message], cwd);
+}
+
+export async function gitStage(paths: string[]) {
+  const cwd = await getWorkspaceRoot();
+  if (paths.length === 0) return { ok: false as const, stdout: "", stderr: "No paths to stage" };
+  return git(["add", "--", ...paths], cwd);
+}
+
+export async function gitUnstage(paths: string[]) {
+  const cwd = await getWorkspaceRoot();
+  if (paths.length === 0) return { ok: false as const, stdout: "", stderr: "No paths to unstage" };
+  // `restore --staged` works on modern git; fall back to `reset HEAD` for older ones.
+  const restore = await git(["restore", "--staged", "--", ...paths], cwd);
+  if (restore.ok) return restore;
+  return git(["reset", "HEAD", "--", ...paths], cwd);
+}
+
+/**
+ * Left = HEAD (or empty for new files). Right = working tree (or empty if deleted).
+ * This is the simplest useful view: "what does disk look like vs the last commit".
+ */
+export async function gitFileDiff(relPath: string) {
+  const cwd = await getWorkspaceRoot();
+  const posix = relPath.replace(/\\/g, "/");
+
+  const head = await git(["show", `HEAD:${posix}`], cwd);
+  let original = head.ok ? head.stdout : "";
+
+  let modified = "";
+  let deleted = false;
+  try {
+    modified = await fs.readFile(path.join(cwd, posix), "utf8");
+  } catch {
+    deleted = true;
+    modified = "";
+  }
+
+  const tracked = await git(["ls-files", "--error-unmatch", "--", posix], cwd);
+  if (!tracked.ok) original = "";
+
+  return {
+    ok: true as const,
+    path: posix,
+    original,
+    modified,
+    deleted,
+    isNew: !tracked.ok,
+  };
 }
 
 export async function gitPush() {
@@ -154,7 +220,11 @@ export async function gitPush() {
   if (upstream.ok) return git(["push"], cwd);
   const origin = await git(["remote", "get-url", "origin"], cwd);
   if (!origin.ok) {
-    return { ok: false as const, stdout: "", stderr: "No remote named origin. Add one with: git remote add origin <url>" };
+    return {
+      ok: false as const,
+      stdout: "",
+      stderr: "No remote named origin. Add one with: git remote add origin <url>",
+    };
   }
   return git(["push", "-u", "origin", "HEAD"], cwd);
 }

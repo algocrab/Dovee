@@ -43,6 +43,12 @@ const SKIP_PROJECT_DIRS = new Set([
 const SKIP_PACKAGE_DIRS = new Set(["node_modules"]);
 
 /**
+ * Always loaded with the base bundle so a blank React/TS file still gets
+ * completions for `useState`, `process`, etc. before any import is written.
+ */
+const ESSENTIAL_PACKAGES = ["@types/node", "@types/react", "@types/react-dom", "csstype"];
+
+/**
  * tsconfig.json is JSONC, so strip comments and trailing commas before parsing.
  * Tracks string state so `//` inside a string (a URL, a glob) is left alone.
  */
@@ -147,63 +153,33 @@ function walkSource(
 
 /** `@scope/name` -> `@types/scope__name`, matching the DefinitelyTyped convention. */
 function typesPackageName(name: string) {
+  if (name.startsWith("@types/")) return name.slice("@types/".length);
   if (!name.startsWith("@")) return name;
   const [scope, rest] = name.split("/");
-  return rest ? `${scope}__${rest}` : name;
+  return rest ? `${scope.slice(1)}__${rest}` : name.slice(1);
 }
 
 /**
- * The packages worth feeding to Monaco, in priority order.
- *
- * Two deliberate restrictions keep the payload sane:
- *  - Bundled types only come from runtime `dependencies`. Dev-only tooling
- *    (typescript, electron-builder, eslint, ...) is megabytes nobody imports.
- *  - @types come from every declared dependency, because @types/react is itself
- *    a devDependency but is the single most valuable one to have.
- * Not "every @types/*": that list is dominated by transitive dev types
- * (keyv, cacheable-request, ...) which would eat the budget before React got a look in.
+ * Pull bare package names out of import/require/export-from statements.
+ * Skips relative paths and tsconfig path aliases (`@/...`).
  */
-async function typePackages(
-  root: string,
-  runtimeDeps: Record<string, string>,
-  allDeps: Record<string, string>,
-) {
-  const nodeModules = path.join(root, "node_modules");
-  const ordered: string[] = [];
-  const seen = new Set<string>();
-
-  const add = (dir: string) => {
-    const key = dir.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    ordered.push(dir);
-  };
-  const packageDir = (name: string) => path.join(nodeModules, name);
-
-  // 1. Runtime dependencies that ship their own types (next, zustand, lucide-react, ...).
-  for (const name of Object.keys(runtimeDeps)) {
-    const dir = packageDir(name);
-    if (hasTypes(await readJson<PkgJson>(path.join(dir, "package.json")))) add(dir);
+export function extractPackageImports(source: string): string[] {
+  const found = new Set<string>();
+  const re =
+    /(?:import|export)(?:[\s\S]*?from\s*|[\s]*|[\s]+type[\s\S]*?from\s*)["']([^"']+)["']|require\(\s*["']([^"']+)["']\s*\)|import\(\s*["']([^"']+)["']\s*\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source))) {
+    const spec = match[1] || match[2] || match[3];
+    if (!spec) continue;
+    if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("@/")) continue;
+    // Scoped: @scope/name[/subpath] -> @scope/name
+    // Bare: name[/subpath] -> name
+    const pkg = spec.startsWith("@")
+      ? spec.split("/").slice(0, 2).join("/")
+      : spec.split("/")[0];
+    if (pkg) found.add(pkg);
   }
-
-  // 2. Matching @types for every declared dependency, plus @types/node which everything leans on.
-  const wanted = new Set<string>(["node"]);
-  for (const name of Object.keys(allDeps)) wanted.add(typesPackageName(name));
-  for (const name of wanted) {
-    const dir = path.join(nodeModules, "@types", name);
-    if (await pathExists(dir)) add(dir);
-  }
-
-  // 3. One level of type dependencies, so e.g. @types/react-dom can find csstype.
-  for (const dir of [...ordered]) {
-    const pkg = await readJson<PkgJson>(path.join(dir, "package.json"));
-    for (const dep of Object.keys(pkg?.dependencies ?? {})) {
-      const depDir = packageDir(dep);
-      if (hasTypes(await readJson<PkgJson>(path.join(depDir, "package.json")))) add(depDir);
-    }
-  }
-
-  return ordered;
+  return [...found];
 }
 
 function toVirtualPath(root: string, abs: string) {
@@ -243,6 +219,13 @@ async function readInto(
     try {
       const stat = await fs.stat(abs);
       if (stat.size > MAX_FILE_BYTES) {
+        budget.skipped++;
+        continue;
+      }
+      // Skip lucide-react alternate entry points — nobody imports them, they
+      // alone are ~4 MB of near-duplicate icon declarations.
+      const base = path.basename(abs);
+      if (base.includes(".prefixed.") || base.includes(".suffixed.")) {
         budget.skipped++;
         continue;
       }
@@ -292,8 +275,6 @@ const MONACO_MODULES: Record<string, number> = {
   es6: 5,
   es2015: 5,
   esnext: 99,
-  // Node16/NodeNext/Preserve do not exist in Monaco's enum, so they are left
-  // unset rather than mapped to a wrong value.
 };
 
 /** monaco.d.ts JsxEmit: None=0, Preserve=1, React=2, ReactNative=3, ReactJSX=4, ReactJSXDev=5 */
@@ -363,41 +344,166 @@ export function toMonacoCompilerOptions(raw: Record<string, unknown>) {
   return options;
 }
 
-async function build(): Promise<TypeBundle> {
-  const root = await getWorkspaceRoot();
-  const workspacePkg = await readJson<PkgJson>(path.join(root, "package.json"));
-  const runtimeDeps = workspacePkg?.dependencies ?? {};
-  const allDeps = { ...runtimeDeps, ...(workspacePkg?.devDependencies ?? {}) };
-
-  let compilerOptions: Record<string, unknown>;
+async function resolveCompilerOptions(root: string) {
   try {
     const raw = await fs.readFile(path.join(root, "tsconfig.json"), "utf8");
     const parsed = parseJsonc<{ compilerOptions?: Record<string, unknown> }>(raw);
-    compilerOptions = toMonacoCompilerOptions(parsed.compilerOptions ?? {});
+    return toMonacoCompilerOptions(parsed.compilerOptions ?? {});
   } catch {
-    compilerOptions = toMonacoCompilerOptions({});
+    return toMonacoCompilerOptions({});
+  }
+}
+
+/**
+ * Resolve a package name to directories that hold .d.ts files:
+ * the package itself (if it ships types) and/or its @types counterpart.
+ */
+async function packageDirsFor(root: string, name: string): Promise<string[]> {
+  const nodeModules = path.join(root, "node_modules");
+  const dirs: string[] = [];
+  const seen = new Set<string>();
+
+  const add = async (dir: string) => {
+    const key = dir.toLowerCase();
+    if (seen.has(key)) return;
+    if (!(await pathExists(dir))) return;
+    seen.add(key);
+    dirs.push(dir);
+  };
+
+  // Direct package (next, zustand, lucide-react, @xterm/xterm, ...).
+  const pkgDir = path.join(nodeModules, name);
+  const pkg = await readJson<PkgJson>(path.join(pkgDir, "package.json"));
+  if (hasTypes(pkg) || name.startsWith("@types/")) await add(pkgDir);
+
+  // Matching @types package.
+  if (!name.startsWith("@types/")) {
+    const typesName = typesPackageName(name);
+    await add(path.join(nodeModules, "@types", typesName));
   }
 
-  const budget: Budget = { bytes: 0, files: 0, skipped: 0 };
+  // One level of type dependencies (e.g. @types/react-dom -> csstype).
+  for (const dir of [...dirs]) {
+    const meta = await readJson<PkgJson>(path.join(dir, "package.json"));
+    for (const dep of Object.keys(meta?.dependencies ?? {})) {
+      const depDir = path.join(nodeModules, dep);
+      if (hasTypes(await readJson<PkgJson>(path.join(depDir, "package.json")))) {
+        await add(depDir);
+      }
+    }
+  }
+
+  return dirs;
+}
+
+async function loadPackageLibs(root: string, names: string[], budget: Budget) {
   const libs: TypeLib[] = [];
+  const loaded = new Set<string>();
 
-  // Workspace sources first, and with their own generous cap, so they can never be
-  // squeezed out by node_modules.
-  const sources = await projectFiles(root);
-  await readInto(root, sources, libs, budget, sources.length);
+  for (const name of names) {
+    if (loaded.has(name)) continue;
+    loaded.add(name);
+    const dirs = await packageDirsFor(root, name);
+    for (const dir of dirs) {
+      const files: string[] = [];
+      await walkSource(dir, isDeclaration, files, SKIP_PACKAGE_DIRS);
+      await readInto(root, files, libs, budget, MAX_FILES);
+    }
+  }
 
-  const packages = await typePackages(root, runtimeDeps, allDeps);
-  for (const pkgDir of packages) {
-    const files: string[] = [];
-    await walkSource(pkgDir, isDeclaration, files, SKIP_PACKAGE_DIRS);
-    await readInto(root, files, libs, budget, MAX_FILES);
+  return libs;
+}
+
+type Cache = {
+  root: string;
+  compilerOptions: Record<string, unknown>;
+  baseLibs: TypeLib[];
+  baseStats: TypeBundle["stats"];
+  packages: Map<string, TypeLib[]>;
+};
+
+const g = globalThis as typeof globalThis & { __doveeTypeCache?: Promise<Cache> };
+
+async function getCache(): Promise<Cache> {
+  if (!g.__doveeTypeCache) {
+    g.__doveeTypeCache = (async () => {
+      const root = await getWorkspaceRoot();
+      const compilerOptions = await resolveCompilerOptions(root);
+      const budget: Budget = { bytes: 0, files: 0, skipped: 0 };
+      const baseLibs: TypeLib[] = [];
+
+      // Workspace sources first.
+      const sources = await projectFiles(root);
+      await readInto(root, sources, baseLibs, budget, sources.length);
+
+      // Essential ambient types so blank files still get React/Node completions.
+      const essential = await loadPackageLibs(root, ESSENTIAL_PACKAGES, budget);
+      baseLibs.push(...essential);
+
+      return {
+        root,
+        compilerOptions,
+        baseLibs,
+        baseStats: {
+          packages: ESSENTIAL_PACKAGES.length,
+          files: budget.files,
+          bytes: budget.bytes,
+          skipped: budget.skipped,
+        },
+        packages: new Map(),
+      };
+    })().catch((error) => {
+      g.__doveeTypeCache = undefined;
+      throw error;
+    });
+  }
+  return g.__doveeTypeCache;
+}
+
+/** Base bundle: compiler options + project sources + essential ambient types. */
+export async function getTypeBundle(): Promise<TypeBundle> {
+  const cache = await getCache();
+  return {
+    compilerOptions: cache.compilerOptions,
+    libs: cache.baseLibs,
+    stats: cache.baseStats,
+  };
+}
+
+/**
+ * Load .d.ts files for the given package names (and their @types / type deps).
+ * Results are cached per package for the lifetime of the server process.
+ */
+export async function getPackageTypeLibs(names: string[]): Promise<{
+  libs: TypeLib[];
+  stats: TypeBundle["stats"];
+}> {
+  const cache = await getCache();
+  const libs: TypeLib[] = [];
+  const budget: Budget = { bytes: 0, files: 0, skipped: 0 };
+  let packages = 0;
+
+  for (const name of names) {
+    const key = name.toLowerCase();
+    let pkgLibs = cache.packages.get(key);
+    if (!pkgLibs) {
+      const freshBudget: Budget = { bytes: 0, files: 0, skipped: 0 };
+      pkgLibs = await loadPackageLibs(cache.root, [name], freshBudget);
+      cache.packages.set(key, pkgLibs);
+      budget.skipped += freshBudget.skipped;
+    }
+    packages++;
+    for (const lib of pkgLibs) {
+      libs.push(lib);
+      budget.files++;
+      budget.bytes += lib.text.length;
+    }
   }
 
   return {
-    compilerOptions,
     libs,
     stats: {
-      packages: packages.length,
+      packages,
       files: budget.files,
       bytes: budget.bytes,
       skipped: budget.skipped,
@@ -405,19 +511,7 @@ async function build(): Promise<TypeBundle> {
   };
 }
 
-const g = globalThis as typeof globalThis & { __doveeTypeBundle?: Promise<TypeBundle> };
-
-/** Cached: node_modules rarely changes mid-session. */
-export function getTypeBundle() {
-  if (!g.__doveeTypeBundle) {
-    g.__doveeTypeBundle = build().catch((error) => {
-      g.__doveeTypeBundle = undefined;
-      throw error;
-    });
-  }
-  return g.__doveeTypeBundle;
-}
-
+/** @deprecated alias kept for any leftover callers */
 export function resetTypeBundle() {
-  g.__doveeTypeBundle = undefined;
+  g.__doveeTypeCache = undefined;
 }

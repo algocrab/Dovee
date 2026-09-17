@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { PROVIDERS } from "@/lib/providers";
+import { clampMaxToolRounds } from "@/lib/tool-rounds";
 import { loadSettings, publicSettings, saveSettings, type DoveeSettings } from "@/lib/settings";
 import { restartAllShells } from "@/lib/shell";
 
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
   if (typeof body.wordWrap === "boolean") patch.wordWrap = body.wordWrap;
   if (typeof body.minimap === "boolean") patch.minimap = body.minimap;
   if (typeof body.autoSave === "boolean") patch.autoSave = body.autoSave;
+  if (typeof body.maxToolRounds === "number") patch.maxToolRounds = clampMaxToolRounds(body.maxToolRounds);
   const next = await saveSettings(patch);
   if (patch.workspace) await restartAllShells();
   return NextResponse.json(publicSettings(next));

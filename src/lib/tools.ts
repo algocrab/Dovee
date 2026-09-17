@@ -23,9 +23,13 @@ export type ToolResult = {
   changedFiles?: string[];
 };
 
-const MAX_READ = 200_000;
+/** Hard cap on characters returned from a single read_file call. */
+const MAX_READ = 12_000;
+/** When the model omits end_line, only return this many lines (forces ranged reads). */
+const DEFAULT_READ_LINES = 400;
 const MAX_SEARCH_HITS = 80;
 const MAX_SEARCH_FILE_BYTES = 400_000;
+const MAX_TERMINAL_CHARS = 8_000;
 
 export const TOOL_SCHEMAS = [
   {
@@ -33,7 +37,7 @@ export const TOOL_SCHEMAS = [
     function: {
       name: "read_file",
       description:
-        "Read a file in the workspace. Use line ranges for large files. Line numbers are 1-based.",
+        "Read a file in the workspace. Prefer start_line/end_line for anything non-trivial — unscoped reads return at most ~400 lines. Line numbers are 1-based.",
       parameters: {
         type: "object",
         properties: {
@@ -210,15 +214,31 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
         if (stat.isDirectory()) return { ok: false, output: `${rel} is a directory. Use list_directory.` };
         if (isBinaryPath(abs)) return { ok: false, output: `Refusing to read binary file: ${rel}` };
         if (stat.size > MAX_READ * 4) {
-          return { ok: false, output: `File is too large (${stat.size} bytes). Read a line range.` };
+          return {
+            ok: false,
+            output: `File is too large (${stat.size} bytes). Call read_file with start_line/end_line.`,
+          };
         }
         const raw = await fs.readFile(abs, "utf8");
         const all = raw.replace(/\r\n/g, "\n").split("\n");
         const start = Math.max(1, Number(args.start_line) || 1);
-        const end = Math.min(all.length, Number(args.end_line) || all.length);
+        const hasEnd = args.end_line != null && args.end_line !== "";
+        const end = Math.min(
+          all.length,
+          hasEnd ? Number(args.end_line) || all.length : Math.min(all.length, start + DEFAULT_READ_LINES - 1),
+        );
         const slice = all.slice(start - 1, end).join("\n");
         const body = formatRead(slice, start);
-        const clipped = body.length > MAX_READ ? `${body.slice(0, MAX_READ)}\n… truncated` : body;
+        let clipped = body.length > MAX_READ ? `${body.slice(0, MAX_READ)}\n… truncated` : body;
+        const notes: string[] = [];
+        if (!hasEnd && end < all.length) {
+          notes.push(
+            `Showing lines ${start}–${end} of ${all.length}. Pass end_line (or a higher start_line) to read more.`,
+          );
+        } else if (body.length > MAX_READ) {
+          notes.push(`Output clipped to ${MAX_READ} chars. Use a tighter line range.`);
+        }
+        if (notes.length) clipped = `${clipped}\n\n[${notes.join(" ")}]`;
         return { ok: true, output: clipped };
       }
       case "list_directory": {
@@ -299,11 +319,13 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
               windowsHide: true,
             },
           );
-          const text = [stdout, stderr].filter(Boolean).join("\n").trim();
+          const text = clipTerminal([stdout, stderr].filter(Boolean).join("\n").trim());
           return { ok: true, output: text || "(no output)" };
         } catch (error) {
           const err = error as { stdout?: string; stderr?: string; message?: string };
-          const text = [err.stdout, err.stderr, err.message].filter(Boolean).join("\n").trim();
+          const text = clipTerminal(
+            [err.stdout, err.stderr, err.message].filter(Boolean).join("\n").trim(),
+          );
           return { ok: false, output: text || "Command failed" };
         }
       }
@@ -341,4 +363,12 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
   } catch (error) {
     return { ok: false, output: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function clipTerminal(text: string) {
+  if (!text) return text;
+  if (text.length <= MAX_TERMINAL_CHARS) return text;
+  const head = Math.floor(MAX_TERMINAL_CHARS * 0.7);
+  const tail = MAX_TERMINAL_CHARS - head - 40;
+  return `${text.slice(0, head)}\n\n… [${text.length - head - tail} chars omitted] …\n\n${text.slice(-tail)}`;
 }

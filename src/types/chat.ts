@@ -1,3 +1,13 @@
+export type ChatUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cached_tokens?: number;
+  cost_usd?: number;
+  /** True when cost_usd came from a local rate-card estimate, not the provider bill. */
+  estimated?: boolean;
+};
+
 export type ToolCard = {
   id: string;
   name: string;
@@ -22,6 +32,7 @@ export type ChatMsg = {
   content: string;
   thinking?: string;
   tools: ToolCard[];
+  usage?: ChatUsage;
   attachments?: ChatAttachment[];
 };
 
