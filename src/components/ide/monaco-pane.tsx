@@ -2,9 +2,10 @@
 
 import Editor, { DiffEditor, loader, type OnMount } from "@monaco-editor/react";
 import type { languages } from "monaco-editor";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
+import { formatActive } from "./actions";
 import { AddToChatButton, type ChatSpot } from "./add-to-chat";
 import { EditorWelcome } from "./chrome";
 
@@ -195,6 +196,7 @@ export function MonacoPane() {
   const activePath = useIde((s) => s.activePath);
   const updateContent = useIde((s) => s.updateContent);
   const setCursor = useIde((s) => s.setCursor);
+  const reveal = useIde((s) => s.reveal);
   const theme = (useIde((s) => s.settings?.theme) ?? "dark") as ThemeId;
   const fontSize = useIde((s) => s.settings?.editorFontSize ?? 15);
   const wordWrap = useIde((s) => s.settings?.wordWrap ?? true);
@@ -202,6 +204,7 @@ export function MonacoPane() {
   const tab = tabs.find((t) => t.path === activePath);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const appliedReveal = useRef<{ editor: unknown; nonce: number } | null>(null);
   const pathRef = useRef<string | null>(tab?.path ?? null);
   const [spot, setSpot] = useState<ChatSpot | null>(null);
 
@@ -209,6 +212,25 @@ export function MonacoPane() {
   useEffect(() => {
     pathRef.current = tab?.path ?? null;
   }, [tab?.path]);
+
+  /**
+   * One-shot reveal: jump to the line a caller asked for, but only if the request
+   * targets the tab that is actually active. Guarded per editor instance so a
+   * pending jump survives the remount that a tab switch triggers.
+   */
+  const applyReveal = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const state = useIde.getState();
+    const request = state.reveal;
+    if (!request || request.path !== state.activePath) return;
+    const applied = appliedReveal.current;
+    if (applied && applied.editor === editor && applied.nonce === request.nonce) return;
+    appliedReveal.current = { editor, nonce: request.nonce };
+    editor.revealLineInCenter(request.line);
+    editor.setPosition({ lineNumber: request.line, column: Math.max(1, request.column || 1) });
+    editor.focus();
+  }, []);
 
   // Whenever the active buffer changes (tab switch or edit), pull types for any
   // new bare imports it references. Already-loaded packages are a no-op.
@@ -232,6 +254,12 @@ export function MonacoPane() {
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
   }, [fontSize, wordWrap, minimap]);
 
+  // Jump when Search / Problems / go-to raises a reveal request for this file.
+  // Tracked per editor instance so a remount (tab switch) still lands the jump.
+  useEffect(() => {
+    applyReveal();
+  }, [reveal, tab?.path, applyReveal]);
+
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
@@ -241,6 +269,19 @@ export function MonacoPane() {
     void loadTypeLibs(monaco).then(() => {
       const model = editor.getModel();
       if (model) schedulePackageScan(monaco, model.getValue());
+    });
+    applyReveal();
+    applyReveal();
+
+    // Monaco's own Format Document has no provider registered, so route Shift+Alt+F
+    // through the same server-side prettier that backs format-on-save.
+    editor.addAction({
+      id: "dovee.formatDocument",
+      label: "Format Document",
+      keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+      run: () => {
+        void formatActive();
+      },
     });
 
     const showSelectionAction = () => {

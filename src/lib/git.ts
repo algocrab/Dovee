@@ -181,6 +181,87 @@ export async function gitUnstage(paths: string[]) {
   return git(["reset", "HEAD", "--", ...paths], cwd);
 }
 
+/** Drop local changes. Untracked paths are deleted; tracked paths reset to HEAD. */
+export async function gitDiscard(paths: string[]) {
+  if (!paths.length) return { ok: true as const, stdout: "", stderr: "" };
+  const cwd = await getWorkspaceRoot();
+  const st = await gitStatus();
+  const byPath = new Map(st.files.map((f) => [f.path, f]));
+  const untracked: string[] = [];
+  const tracked: string[] = [];
+
+  for (const p of paths) {
+    const f = byPath.get(p);
+    // Untracked / new files show as ?? in porcelain and should be cleaned, not restored.
+    if (!f || (f.index === "?" && f.worktree === "?") || f.label === "untracked") untracked.push(p);
+    else tracked.push(p);
+  }
+
+  const parts: string[] = [];
+  let ok = true;
+
+  if (tracked.length) {
+    let res = await git(
+      ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked],
+      cwd,
+    );
+    if (!res.ok) res = await git(["checkout", "HEAD", "--", ...tracked], cwd);
+    if (res.stdout) parts.push(res.stdout);
+    if (res.stderr) parts.push(res.stderr);
+    if (!res.ok) ok = false;
+  }
+
+  if (untracked.length) {
+    const res = await git(["clean", "-f", "--", ...untracked], cwd);
+    if (res.stdout) parts.push(res.stdout);
+    if (res.stderr) parts.push(res.stderr);
+    if (!res.ok) ok = false;
+  }
+
+  return {
+    ok,
+    stdout: parts.filter(Boolean).join("\n"),
+    stderr: ok ? "" : parts.filter(Boolean).join("\n") || "Discard failed",
+  };
+}
+
+export type GitBranch = {
+  name: string;
+  current: boolean;
+};
+
+export async function gitBranches(): Promise<GitBranch[]> {
+  const cwd = await getWorkspaceRoot();
+  const res = await git(["branch", "--list", "--format=%(refname:short)\t%(HEAD)"], cwd);
+  if (!res.ok) return [];
+  return res.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, head] = line.split("\t");
+      return { name: name ?? line, current: head === "*" };
+    })
+    .filter((b) => b.name);
+}
+
+export async function gitCheckout(branch: string) {
+  const name = branch.trim();
+  if (!name) return { ok: false as const, stdout: "", stderr: "Branch name required" };
+  const cwd = await getWorkspaceRoot();
+  return git(["checkout", name], cwd);
+}
+
+export async function gitCreateBranch(name: string) {
+  const branch = name.trim();
+  if (!branch) return { ok: false as const, stdout: "", stderr: "Branch name required" };
+  if (!/^[A-Za-z0-9._/\-]+$/.test(branch)) {
+    return { ok: false as const, stdout: "", stderr: "Invalid branch name" };
+  }
+  const cwd = await getWorkspaceRoot();
+  return git(["checkout", "-b", branch], cwd);
+}
+
 /**
  * Left = HEAD (or empty for new files). Right = working tree (or empty if deleted).
  * This is the simplest useful view: "what does disk look like vs the last commit".

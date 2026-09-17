@@ -22,6 +22,8 @@ export type DoveeSettings = {
   wordWrap: boolean;
   minimap: boolean;
   autoSave: boolean;
+  /** Run prettier over the buffer before it is written on save. */
+  formatOnSave: boolean;
   maxToolRounds: number;
 };
 
@@ -53,11 +55,6 @@ function isPackagedApp() {
 
 function emptyUserWorkspace() {
   return path.join(os.homedir(), "Dovee");
-}
-
-function isPlaceholderWorkspace(dir?: string) {
-  if (!dir?.trim()) return true;
-  return path.resolve(/* turbopackIgnore: true */ dir) === path.resolve(/* turbopackIgnore: true */ emptyUserWorkspace());
 }
 
 function defaultDevWorkspace() {
@@ -110,6 +107,8 @@ const DEFAULTS: DoveeSettings = {
   wordWrap: true,
   minimap: false,
   autoSave: false,
+  // Opt-in: formatting rewrites the whole file, so it never happens unasked.
+  formatOnSave: false,
   maxToolRounds: DEFAULT_MAX_TOOL_ROUNDS,
 };
 
@@ -148,7 +147,7 @@ export async function loadSettings(): Promise<DoveeSettings> {
   const envWorkspace = process.env.DOVEE_WORKSPACE?.trim();
   const desktopMode = packaged || Boolean(envWorkspace);
   const opened = stored.desktopWorkspace?.trim();
-  const hasOpened = Boolean(opened) && !isPlaceholderWorkspace(opened);
+  const hasOpened = Boolean(opened);
   const chosen = desktopMode
     ? (hasOpened && opened ? opened : envWorkspace || emptyUserWorkspace())
     : envWorkspace || stored.workspace || defaultDevWorkspace();
@@ -169,6 +168,8 @@ export async function loadSettings(): Promise<DoveeSettings> {
     wordWrap: typeof stored.wordWrap === "boolean" ? stored.wordWrap : DEFAULTS.wordWrap,
     minimap: typeof stored.minimap === "boolean" ? stored.minimap : DEFAULTS.minimap,
     autoSave: typeof stored.autoSave === "boolean" ? stored.autoSave : DEFAULTS.autoSave,
+    formatOnSave:
+      typeof stored.formatOnSave === "boolean" ? stored.formatOnSave : DEFAULTS.formatOnSave,
     maxToolRounds: clampMaxToolRounds(stored.maxToolRounds),
   };
 }
@@ -189,7 +190,12 @@ export async function saveSettings(patch: Partial<DoveeSettings>) {
   const packaged = isPackagedApp() || Boolean(process.env.DOVEE_WORKSPACE?.trim());
   const fileOut: DoveeSettings = { ...next };
   if (packaged) {
-    fileOut.desktopWorkspace = typeof patch.workspace === "string" ? next.workspace : stored.desktopWorkspace;
+    if (typeof patch.workspace === "string" && patch.workspace.trim()) {
+      next.desktopWorkspace = next.workspace;
+      fileOut.desktopWorkspace = next.workspace;
+    } else {
+      fileOut.desktopWorkspace = stored.desktopWorkspace;
+    }
     fileOut.workspace = typeof stored.workspace === "string" && stored.workspace.trim()
       ? stored.workspace
       : next.workspace;
@@ -197,13 +203,13 @@ export async function saveSettings(patch: Partial<DoveeSettings>) {
     fileOut.workspace = next.workspace;
     fileOut.desktopWorkspace = stored.desktopWorkspace;
   }
-  if (!fileOut.desktopWorkspace || isPlaceholderWorkspace(fileOut.desktopWorkspace)) {
+  if (!fileOut.desktopWorkspace?.trim()) {
     delete fileOut.desktopWorkspace;
   }
 
   await fs.mkdir(SETTINGS_DIR, { recursive: true });
   await fs.writeFile(SETTINGS_FILE, JSON.stringify(fileOut, null, 2), "utf8");
-  return next;
+  return loadSettings();
 }
 
 export function publicSettings(settings: DoveeSettings) {
@@ -214,7 +220,7 @@ export function publicSettings(settings: DoveeSettings) {
     reasoningEffort: settings.reasoningEffort,
     workspace: settings.workspace,
     hasFolder: isPackagedApp() || Boolean(process.env.DOVEE_WORKSPACE?.trim())
-      ? !isPlaceholderWorkspace(settings.desktopWorkspace)
+      ? Boolean(settings.desktopWorkspace?.trim())
       : true,
     baseUrl: settings.baseUrl,
     hasApiKey: Boolean(key),
@@ -224,6 +230,7 @@ export function publicSettings(settings: DoveeSettings) {
     wordWrap: settings.wordWrap,
     minimap: settings.minimap,
     autoSave: settings.autoSave,
+    formatOnSave: settings.formatOnSave,
     maxToolRounds: settings.maxToolRounds,
   };
 }

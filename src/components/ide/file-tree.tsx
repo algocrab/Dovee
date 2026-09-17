@@ -19,7 +19,7 @@ export async function refreshRoot() {
   useIde.getState().setTree(entries);
 }
 
-export async function openFile(path: string) {
+export async function openFile(path: string, reveal?: { line?: number; column?: number }) {
   const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`);
   const data = await res.json();
   if (data.error) {
@@ -32,6 +32,11 @@ export async function openFile(path: string) {
     original: data.content,
     language: data.language,
   });
+  if (reveal?.line && reveal.line > 0) {
+    const column = Math.max(1, reveal.column ?? 1);
+    useIde.getState().setCursor(reveal.line, column);
+    useIde.getState().revealIn(data.path, reveal.line, column);
+  }
 }
 
 function Node({
@@ -147,6 +152,8 @@ function ExplorerEmpty({
   hasFolder: boolean;
   onNewFile: () => void;
 }) {
+  const [path, setPath] = useState("");
+
   if (!hasFolder) {
     return (
       <div className="px-3 py-4">
@@ -161,6 +168,20 @@ function ExplorerEmpty({
         >
           Open Folder
         </button>
+        <form
+          className="mt-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (path.trim()) void openFolder(path.trim());
+          }}
+        >
+          <input
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            placeholder="Or paste a folder path"
+            className="w-full rounded-lg border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-teal/40"
+          />
+        </form>
         <p className="mt-2.5 flex items-center gap-1 text-[11px] text-muted">
           <Kbd>Ctrl+K</Kbd>
           <span>then</span>

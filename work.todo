@@ -223,3 +223,167 @@ Bugs I introduced and caught in the same session (worth remembering)
 Housekeeping
 - tsconfig.json / next-env.d.ts / tsconfig.tsbuildinfo are all rewritten or touched by
   `next dev` / `next build`. Commit them once so they stop showing as modified.
+
+=== STATUS UPDATE #4 - 2026-09-17 (Dovee agent) ===
+
+DONE this session
+[x] Shell env leak (already fixed earlier in src/lib/shell.ts via stripDoveeEnv) - confirmed still in place
+[x] #4 Git gaps closed (was mostly done; remaining pieces added)
+    - gitDiscard (tracked restore + untracked clean -f)
+    - gitBranches / gitCheckout / gitCreateBranch
+    - API: view=branches, actions discard|checkout|create-branch
+    - Git panel UI: per-file + bulk discard, branch switcher + create branch
+    - Discard reloads open clean tabs from disk after success
+[x] #5 File watcher (chokidar → SSE → client)
+    New:
+      - src/lib/watcher.ts
+      - src/app/api/watch/route.ts   text/event-stream
+      - src/components/ide/use-file-watcher.ts
+    Wired:
+      - ide-shell mounts useFileWatcher
+      - settings POST workspace change → resetWatcher()
+      - openWorkspaceFolder dispatches dovee:workspace-changed (SSE reconnect)
+    Behavior:
+      - tree + file index refresh (250ms debounce)
+      - git branch status refresh
+      - clean open tabs reload from disk; dirty tabs never clobbered
+      - ignore list reuses IGNORE_DIRS (+ .DS_Store / Thumbs.db)
+    Dep: chokidar@^4 added to dependencies
+
+Verified: `npx tsc --noEmit` clean
+
+STILL PENDING (Sprint 2 remainder)
+[ ] #6 Search options (case, regex?, globs, replace, pagination)
+[ ] #8 Formatter + format-on-save
+[ ] In-editor visual checks for IntelliSense + git discard/branch + live tree refresh
+
+STILL PENDING (Sprint 3+)
+[ ] #7 Command palette fuzzy matching
+[ ] #10 Agent changes visual diff
+[ ] #9 #11-#19 P2 power features
+[ ] API keys → safeStorage / keychain
+
+Suggested next: #8 formatter (quick win for daily use) or #6 search options.
+
+Note: during `npm install chokidar` the lockfile briefly dropped devDeps from
+node_modules (npm bug/partial install). Fixed with `npm install --include=dev`.
+If installs look "too small" (~100 packages instead of ~1100), re-run with
+--include=dev.
+
+=== STATUS UPDATE #5 - 2026-09-17 (Dovee agent, part 2) ===
+
+[x] #6 Search options + replace  (src/lib/search.ts, src/app/api/search/route.ts,
+    src/components/ide/search-panel.tsx, src/lib/tools.ts, src/stores/ide-store.ts,
+    src/components/ide/file-tree.tsx, src/components/ide/monaco-pane.tsx)
+    - New shared engine `searchWorkspace()`: regex/literal, case, whole word, glob,
+      offset/limit pagination, up to 80 hits per page (400-match scan cap).
+    - `replaceInWorkspace()`: page-scoped (paths=) or workspace-wide, $1 backrefs.
+    - Search panel: case / whole-word / regex toggles, include-glob, replace row,
+      "Replace page" + "Replace all" with confirm, prev/next paging footer.
+    - agent `search_codebase` tool now takes case_sensitive / use_regex / whole_word
+      and reports "N total matches (showing M)".
+    - Clicking a hit opens the file AND jumps to the line: new store action
+      `revealIn(path, line, column)` + `reveal` token; monaco-pane applies it once
+      per editor instance (survives the remount a tab switch causes). Guarded so
+      ordinary cursor movement never re-centres the view.
+
+[x] #4 git gap follow-up verified live
+    - POST /api/git {action:"discard", paths:[...]} on an untracked scratch file →
+      {"ok":true,"stdout":"Removing scratch-discard-test.txt"} and file gone.
+    - POST /api/git {action:"checkout", branch:"no-such-branch"} → ok:false with
+      git stderr surfaced (no crash, no repo mutation).
+    - GET /api/git?view=branches → {"branches":[{"name":"main","current":true}]}
+
+[x] #5 file watcher verified live (SSE)
+    - GET /api/watch → 200, text/event-stream, first frame data:{"type":"ready"}
+    - created/edited/deleted scratch file → events in order:
+      add → change → unlink, all with workspace-relative posix paths.
+    - client debounces 250ms, refreshes tree + file index + git branch, and reloads
+      ONLY clean tabs (dirty buffers are never clobbered).
+
+[x] chokidar@^4.0.3 added to dependencies (package.json + lock).
+
+Verification: `npx tsc --noEmit` clean, `npx eslint src` clean (only the two
+pre-existing <img> warnings in agent-panel.tsx).
+
+IMPORTANT - restart the dev server
+  The IDE dev server that was already running (port 3100) still serves the OLD
+  route table: /api/watch returned 404 and /api/git?view=branches fell through to
+  plain status. Newly added route files are not picked up by that instance, so
+  RESTART `npm run dev` (or the Electron app) before testing Search/Git/watch in
+  the UI. Verified against a fresh server on port 3101 - all four endpoints OK.
+
+STILL PENDING (Sprint 2 + 3)
+[ ] #8 Formatter + format-on-save  <-- next, and the last Sprint 2 item
+[ ] #7 Command palette fuzzy matching
+[ ] #10 Agent changes visual diff
+[ ] #9 #11-#19 P2 power features
+[ ] API keys -> safeStorage / keychain
+[ ] Manual UI check: search hit jump, replace confirm, discard confirm, live tree refresh
+=== STATUS UPDATE #6 - 2026-09-17 (Dovee agent, part 3) ===
+
+[x] #8 Formatter + format-on-save  <-- LAST Sprint 2 ITEM. Sprint 2 is now COMPLETE
+    New:
+      - src/lib/format.ts            server-side prettier wrapper
+      - src/app/api/format/route.ts  GET = which prettier, POST = format a buffer
+    Wired:
+      - settings: formatOnSave (type + DEFAULTS + loadSettings + publicSettings +
+        /api/settings patch + PublicSettings + patchAppearance + settings modal toggle)
+      - actions.ts: formatTab(path), formatActive(), saveTab() formats before writing
+      - monaco-pane: Shift+Alt+F -> Format Document (editor.addAction)
+      - command palette: "Format Document"
+    Design notes:
+      - Prefers the WORKSPACE own prettier (createRequire from the file dir), so a
+        project pinned version/config/plugins behave like their own "npx prettier".
+        Falls back to the prettier Dovee ships.
+      - resolveConfig(abs, {editorconfig:true}) honours .prettierrc / .editorconfig;
+        .prettierignore is respected (file silently skipped).
+      - Dovee house style (printWidth 100, 2-space, semi, double quotes, trailingComma
+        all) applies ONLY when the project has no prettier config, so format-on-save
+        can never fight a project CI.
+      - Default OFF (opt-in) -- formatting rewrites a whole file, so never unasked.
+      - Files with no parser (.py, .rs, ...) return ok:false + unsupported:true and the
+        caller stays quiet instead of showing an error.
+      - Formatting never writes: it updates the buffer, then saveTab writes it, so the
+        editor and disk cannot disagree.
+    Dep: prettier@^3.9.7 added to dependencies.
+
+Verified live:
+  GET  /api/format              -> {"available":true,"version":"3.9.7"}
+  POST /api/format messy .ts    -> ok:true, parser typescript, changed:true, output
+                                   correctly reformatted, configPath:null (house style,
+                                   expected because the repo has no prettier config)
+  POST /api/format .py          -> {"ok":false,"unsupported":true,...}
+  GET  /api/settings            -> formatOnSave key present, value false
+  npx tsc --noEmit              -> clean
+  npx eslint src                -> 0 errors (2 pre-existing <img> warnings)
+
+WARNING - apply_diff corrupted files this session
+  The unified-diff tool fuzzy-matched several hunks and, instead of replacing text, it
+  DUPLICATED the context lines and DELETED the structural lines next to them.
+  Damage found and repaired in:
+    src/lib/settings.ts, src/components/ide/settings-modal.tsx,
+    src/components/ide/monaco-pane.tsx, src/stores/ide-store.ts
+  Symptoms seen: duplicated object keys / array items, orphaned function bodies, a
+  missing "const selection = ...", a missing setSearch interface declaration, a missing
+  JSX </section>. All repaired with line-based splice and re-verified with tsc.
+  => After any apply_diff, re-read/diff the file. Prefer small single-hunk diffs, or
+     write_file for anything structural.
+
+WARNING - PowerShell encoding trap
+  Get-Content / Set-Content default to the ANSI code page, so round-tripping a UTF-8 file
+  mangles non-ASCII (em dash became mojibake) and Set-Content -Encoding utf8 adds a BOM.
+  src/lib/tools.ts was hit this way (7 mojibake chars + BOM) and has been repaired.
+  Use [IO.File]::ReadAllText / WriteAllText with Text.UTF8Encoding($false) instead.
+  Repo-wide scan of src/, electron/, scripts/ now reports zero mojibake.
+
+STILL PENDING (Sprint 3+)
+[ ] #7 Command palette fuzzy matching
+[ ] #10 Agent changes visual diff
+[ ] #9 #11-#19 P2 power features (split editor, debugger, extensions, outline, file ops,
+      multi-root, chat search/export, cost display, test runner, settings depth)
+[ ] API keys -> safeStorage / keychain
+[ ] Manual UI check: format-on-save toggle, Shift+Alt+F, Format Document command,
+      search hit jump, live tree refresh
+[ ] Pre-existing gap noticed while here: the autoSave setting is persisted and shown in
+      the settings UI, but nothing implements it (no idle/debounce writer anywhere).

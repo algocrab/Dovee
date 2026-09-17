@@ -33,6 +33,7 @@ function SettingsForm({
   const [wordWrap, setWordWrap] = useState(settings?.wordWrap ?? true);
   const [minimap, setMinimap] = useState(settings?.minimap ?? false);
   const [autoSave, setAutoSave] = useState(settings?.autoSave ?? false);
+  const [formatOnSave, setFormatOnSave] = useState(settings?.formatOnSave ?? false);
   const [maxToolRounds, setMaxToolRounds] = useState(settings?.maxToolRounds ?? 120);
 
   const preset = useMemo(() => getProvider(provider), [provider]);
@@ -67,6 +68,7 @@ function SettingsForm({
         wordWrap,
         minimap,
         autoSave,
+        formatOnSave,
         maxToolRounds,
       };
     if (workspace.trim() && workspace.trim() !== (settings?.workspace ?? "")) {
@@ -143,6 +145,7 @@ function SettingsForm({
             <Switch checked={wordWrap} onChange={setWordWrap} label="Word wrap" />
             <Switch checked={minimap} onChange={setMinimap} label="Minimap" />
             <Switch checked={autoSave} onChange={setAutoSave} label="Auto save" />
+            <Switch checked={formatOnSave} onChange={setFormatOnSave} label="Format on save (prettier)" />
           </div>
         </section>
 

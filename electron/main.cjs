@@ -261,7 +261,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
     },
   });
 
@@ -302,17 +302,27 @@ ipcMain.on("window:close", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
-ipcMain.handle("folder:pick", async (event, startPath) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
+ipcMain.handle("folder:pick", async (_event, startPath) => {
+  let defaultPath = typeof startPath === "string" && startPath.trim() ? startPath.trim() : undefined;
+  if (defaultPath && !fs.existsSync(defaultPath)) defaultPath = undefined;
   const options = {
     title: "Open Folder",
     buttonLabel: "Select Folder",
-    defaultPath: typeof startPath === "string" && startPath ? startPath : undefined,
+    defaultPath,
     properties: ["openDirectory", "createDirectory"],
   };
-  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-  if (result.canceled || !result.filePaths[0]) return null;
-  return result.filePaths[0];
+  // Passing the BrowserWindow as parent on Windows + titleBarOverlay
+  // makes the dialog cancel immediately without appearing.
+  writeLog(`folder:pick opening defaultPath=${defaultPath || ""}`);
+  try {
+    const result = await dialog.showOpenDialog(options);
+    writeLog(`folder:pick canceled=${result.canceled} path=${result.filePaths[0] || ""}`);
+    if (result.canceled || !result.filePaths[0]) return null;
+    return result.filePaths[0];
+  } catch (error) {
+    writeLog(`folder:pick failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 });
 
 const gotLock = app.requestSingleInstanceLock();

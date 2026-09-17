@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   Sparkles,
+  Undo2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
@@ -23,7 +24,9 @@ import { IconButton } from "./chrome";
 import { FileGlyph } from "./file-icon";
 import { openFile } from "./file-tree";
 
-type MenuId = "more" | "commit" | null;
+type MenuId = "more" | "commit" | "branch" | null;
+
+type GitBranchInfo = { name: string; current: boolean };
 
 function splitFilePath(path: string) {
   const normalized = path.replace(/\\/g, "/");
@@ -83,7 +86,7 @@ async function openDiff(filePath: string) {
       useIde.getState().setStatus(data.error || "Could not load diff");
       return;
     }
-    const virtual = `diff:${data.path}`;
+    const virtual = `diff://${data.path}`;
     useIde.getState().openTab({
       path: virtual,
       sourcePath: data.path,
@@ -100,8 +103,10 @@ async function openDiff(filePath: string) {
 export function GitPanel() {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<GitCommit[]>([]);
+  const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [message, setMessage] = useState("");
   const [remote, setRemote] = useState("");
+  const [newBranch, setNewBranch] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState("");
   const [logOk, setLogOk] = useState<boolean | null>(null);
@@ -127,12 +132,14 @@ export function GitPanel() {
   }, []);
 
   const load = useCallback(async () => {
-    const [st, hist] = await Promise.all([
+    const [st, hist, br] = await Promise.all([
       fetch("/api/git").then((r) => r.json()) as Promise<GitStatus & { error?: string }>,
       fetch("/api/git?view=log").then((r) => r.json()) as Promise<{ commits?: GitCommit[] }>,
+      fetch("/api/git?view=branches").then((r) => r.json()) as Promise<{ branches?: GitBranchInfo[] }>,
     ]);
     applyStatus(st);
     setCommits(hist.commits ?? []);
+    setBranches(br.branches ?? []);
   }, [applyStatus]);
 
   useEffect(() => {
@@ -147,6 +154,10 @@ export function GitPanel() {
       .then((r) => r.json())
       .then((hist: { commits?: GitCommit[] }) => setCommits(hist.commits ?? []))
       .catch(() => setCommits([]));
+    fetch("/api/git?view=branches")
+      .then((r) => r.json())
+      .then((br: { branches?: GitBranchInfo[] }) => setBranches(br.branches ?? []))
+      .catch(() => setBranches([]));
   }, [applyStatus]);
 
   useEffect(() => {
@@ -187,6 +198,35 @@ export function GitPanel() {
     }
   }
 
+  async function discardPaths(paths: string[]) {
+    if (!paths.length || busy !== null) return;
+    const label = paths.length === 1 ? paths[0] : `${paths.length} files`;
+    if (!window.confirm(`Discard local changes in ${label}? This cannot be undone.`)) return;
+    await run("discard", { paths });
+    for (const p of paths) {
+      try {
+        const res = await fetch(`/api/files/read?path=${encodeURIComponent(p)}`);
+        if (!res.ok) continue;
+        const data = (await res.json()) as { content?: string };
+        if (typeof data.content === "string") useIde.getState().reloadTab(p, data.content);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async function switchBranch(name: string) {
+    if (!name || busy !== null) return;
+    await run("checkout", { branch: name });
+  }
+
+  async function createBranch() {
+    const name = newBranch.trim();
+    if (!name || busy !== null) return;
+    await run("create-branch", { branch: name });
+    setNewBranch("");
+  }
+
   const connected = Boolean(status?.remote);
   const ahead = status?.ahead ?? 0;
   const files = status?.files ?? [];
@@ -200,7 +240,15 @@ export function GitPanel() {
     void run(kind, { message: message.trim() });
   }
 
-  function FileRow({ file, action }: { file: GitFile; action: "stage" | "unstage" }) {
+  function FileRow({
+    file,
+    action,
+    canDiscard,
+  }: {
+    file: GitFile;
+    action: "stage" | "unstage";
+    canDiscard?: boolean;
+  }) {
     const { name, dir } = splitFilePath(file.path);
     const letter = statusLetter(file.label);
     return (
@@ -221,6 +269,20 @@ export function GitPanel() {
             {letter}
           </span>
         </button>
+        {canDiscard ? (
+          <button
+            type="button"
+            title="Discard changes"
+            disabled={working}
+            onClick={(e) => {
+              e.stopPropagation();
+              void discardPaths([file.path]);
+            }}
+            className="shrink-0 rounded p-0.5 text-muted opacity-0 hover:bg-bg-2 hover:text-rose group-hover:opacity-100 disabled:opacity-30"
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         <button
           type="button"
           title={action === "stage" ? "Stage" : "Unstage"}
@@ -243,6 +305,68 @@ export function GitPanel() {
         <span className="min-w-0 flex-1 truncate px-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
           Changes
         </span>
+        {status?.isRepo ? (
+          <div className="relative">
+            <IconButton
+              title={`Branch: ${status.branch || "unknown"}`}
+              className="max-w-[9rem] gap-1 px-1.5 py-1"
+              active={menu === "branch"}
+              onClick={() => setMenu(menu === "branch" ? null : "branch")}
+            >
+              <GitBranch className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate text-[11px] normal-case tracking-normal">
+                {status.branch || "branch"}
+              </span>
+              <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+            </IconButton>
+            {menu === "branch" && (
+              <Menu className="w-56">
+                <div className="border-b border-line px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                  Local branches
+                </div>
+                <div className="max-h-48 overflow-auto py-1">
+                  {(branches.length ? branches : [{ name: status.branch, current: true }]).map((b) => (
+                    <MenuItem
+                      key={b.name}
+                      disabled={working || b.current || !b.name}
+                      onClick={() => void switchBranch(b.name)}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", b.current ? "bg-teal" : "bg-transparent")}
+                        />
+                        <span className="truncate">{b.name}</span>
+                        {b.current ? <span className="text-[10px] text-muted">current</span> : null}
+                      </span>
+                    </MenuItem>
+                  ))}
+                </div>
+                <div className="border-t border-line p-2">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">New branch</div>
+                  <div className="flex gap-1">
+                    <input
+                      value={newBranch}
+                      onChange={(e) => setNewBranch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void createBranch();
+                      }}
+                      placeholder="feature/…"
+                      className="min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 font-mono text-[11px] outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={working || !newBranch.trim()}
+                      onClick={() => void createBranch()}
+                      className="rounded-md border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-40"
+                    >
+                      Create
+                    </button>
+                  </div>
+                </div>
+              </Menu>
+            )}
+          </div>
+        ) : null}
         <IconButton
           title={showDir ? "Hide file paths" : "Show file paths"}
           className="p-1"
@@ -253,7 +377,7 @@ export function GitPanel() {
         </IconButton>
         <IconButton
           title={unstaged.length ? "Stage all changes" : "Nothing to stage"}
-          className={cn("p-1", (working || unstaged.length === 0) && "opacity-40 pointer-events-none")}
+          className={cn("p-1", (working || unstaged.length === 0) && "pointer-events-none opacity-40")}
           onClick={() => {
             if (working || unstaged.length === 0) return;
             void run("stage", { paths: unstaged.map((f) => f.path) });
@@ -261,11 +385,26 @@ export function GitPanel() {
         >
           <Check className="h-3.5 w-3.5" />
         </IconButton>
+        <IconButton
+          title={unstaged.length ? "Discard all unstaged changes" : "Nothing to discard"}
+          className={cn("p-1", (working || unstaged.length === 0) && "pointer-events-none opacity-40")}
+          onClick={() => {
+            if (working || unstaged.length === 0) return;
+            void discardPaths(unstaged.map((f) => f.path));
+          }}
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+        </IconButton>
         <IconButton title="Refresh" className="p-1" onClick={() => void load()}>
           <RefreshCw className={cn("h-3.5 w-3.5", working && "animate-spin")} />
         </IconButton>
         <div className="relative">
-          <IconButton title="More actions" className="p-1" active={menu === "more"} onClick={() => setMenu(menu === "more" ? null : "more")}>
+          <IconButton
+            title="More actions"
+            className="p-1"
+            active={menu === "more"}
+            onClick={() => setMenu(menu === "more" ? null : "more")}
+          >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </IconButton>
           {menu === "more" && (
@@ -284,7 +423,9 @@ export function GitPanel() {
               <MenuItem disabled={working || !connected} onClick={() => void run("pull")}>
                 {busy === "pull" ? "Pulling…" : "Pull"}
               </MenuItem>
-              <MenuItem onClick={() => setOpenHistory((v) => !v)}>{openHistory ? "Hide history" : "Show history"}</MenuItem>
+              <MenuItem onClick={() => setOpenHistory((v) => !v)}>
+                {openHistory ? "Hide history" : "Show history"}
+              </MenuItem>
             </Menu>
           )}
         </div>
@@ -308,9 +449,8 @@ export function GitPanel() {
               target="_blank"
               rel="noreferrer"
               className="mb-1 block truncate font-mono text-[11px] text-teal hover:underline"
-              title={status.remote}
             >
-              {status.remote.replace(/^https?:\/\//, "")}
+              {status.remote}
             </a>
           )}
           <div className="flex gap-1">
@@ -323,53 +463,69 @@ export function GitPanel() {
             <button
               type="submit"
               disabled={working || !remote.trim()}
-              className="shrink-0 rounded-md bg-teal/15 px-2 py-1 text-[11px] text-teal disabled:opacity-40"
+              className="rounded-md border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-40"
             >
-              {connected ? "Update" : "Connect"}
+              {connected ? "Save" : "Connect"}
             </button>
           </div>
         </form>
       )}
 
-      {status && !status.isRepo && (
-        <div className="px-3 py-3">
-          <p className="text-xs text-muted">This folder is not a git repository.</p>
+      {!status ? (
+        <div className="flex flex-1 items-center justify-center text-[12px] text-muted">Loading…</div>
+      ) : !status.isRepo ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
+          <GitBranch className="h-8 w-8 text-muted" />
+          <p className="text-[13px] text-muted">This folder is not a git repository.</p>
           <button
             type="button"
             disabled={working}
             onClick={() => void run("init")}
-            className="mt-3 w-full rounded-md bg-teal/15 px-2 py-1.5 text-xs text-teal"
+            className="rounded-md border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-40"
           >
-            Initialize repository
+            {busy === "init" ? "Initializing…" : "Initialize repository"}
           </button>
         </div>
-      )}
-
-      {status?.isRepo && (
+      ) : (
         <>
-          <div className="px-2 pb-2">
+          <div className="border-b border-line px-2 pb-2">
+            {status.branch && (
+              <div className="mb-1.5 flex items-center gap-1.5 px-1 font-mono text-[11px] text-muted">
+                <GitBranch className="h-3 w-3 text-teal" />
+                <span className="truncate text-teal/90">{status.branch}</span>
+                {ahead > 0 && <span className="text-gold">↑{ahead}</span>}
+                {!!status.behind && <span className="text-rose">↓{status.behind}</span>}
+                {connected && (
+                  <a
+                    href={status.remote ?? undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-auto inline-flex items-center gap-1 text-muted hover:text-teal"
+                    title={status.remote ?? undefined}
+                  >
+                    <Cloud className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+            )}
             <div className="relative">
               <textarea
                 ref={messageRef}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && canCommit) {
+                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                     e.preventDefault();
                     commit("commit");
                   }
                 }}
-                placeholder={
-                  staged.length === 0
-                    ? "Stage files to commit"
-                    : "Message (Ctrl+Enter to commit)"
-                }
-                rows={2}
-                className="w-full resize-none rounded-md border border-line bg-bg py-1.5 pr-8 pl-2 text-[12px] outline-none placeholder:text-muted/80"
+                rows={3}
+                placeholder="Commit message"
+                className="w-full resize-none rounded-md border border-line bg-bg px-2 py-1.5 pr-8 text-[12px] outline-none placeholder:text-muted"
               />
               <button
                 type="button"
-                title="Generate commit message"
+                title="Suggest message"
                 disabled={staged.length === 0}
                 onClick={() => {
                   setMessage(suggestCommitMessage(staged));
@@ -458,24 +614,38 @@ export function GitPanel() {
               count={unstaged.length}
               action={
                 unstaged.length > 0 ? (
-                  <button
-                    type="button"
-                    title="Stage all"
-                    disabled={working}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void run("stage", { paths: unstaged.map((f) => f.path) });
-                    }}
-                    className="rounded p-0.5 text-muted hover:bg-hover hover:text-text disabled:opacity-40"
-                  >
-                    <Plus className="h-3 w-3" />
-                  </button>
+                  <span className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      title="Discard all"
+                      disabled={working}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void discardPaths(unstaged.map((f) => f.path));
+                      }}
+                      className="rounded p-0.5 text-muted hover:bg-hover hover:text-rose disabled:opacity-40"
+                    >
+                      <Undo2 className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Stage all"
+                      disabled={working}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void run("stage", { paths: unstaged.map((f) => f.path) });
+                      }}
+                      className="rounded p-0.5 text-muted hover:bg-hover hover:text-text disabled:opacity-40"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </span>
                 ) : null
               }
             >
               {unstaged.length === 0 && <p className="px-3 py-2 text-[11px] text-muted">Working tree clean.</p>}
               {unstaged.map((file) => (
-                <FileRow key={`u:${file.path}`} file={file} action="stage" />
+                <FileRow key={`u:${file.path}`} file={file} action="stage" canDiscard />
               ))}
             </Section>
 
@@ -499,18 +669,15 @@ export function GitPanel() {
                       )}
                     />
                     <div className="flex items-start gap-2">
-                      <p className="min-w-0 flex-1 truncate text-[12px] leading-snug">{commitItem.subject}</p>
-                      {i === 0 && (
-                        <span className="mt-0.5 flex shrink-0 items-center gap-1 rounded-full bg-teal/15 px-1.5 py-0.5 font-mono text-[10px] text-teal">
-                          {status.branch || "HEAD"}
-                          {ahead > 0 && <Cloud className="h-3 w-3" />}
-                        </span>
-                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px]">{commitItem.subject}</div>
+                        <div className="mt-0.5 flex gap-2 font-mono text-[10px] text-muted">
+                          <span>{commitItem.hash.slice(0, 7)}</span>
+                          <span className="truncate">{commitItem.author}</span>
+                          <span className="shrink-0">{commitItem.date}</span>
+                        </div>
+                      </div>
                     </div>
-                    <p className="truncate text-[10px] text-muted">
-                      {commitItem.author}
-                      {commitItem.date ? ` · ${commitItem.date.slice(0, 10)}` : ""}
-                    </p>
                   </li>
                 ))}
               </ol>
@@ -522,7 +689,7 @@ export function GitPanel() {
       {log && (
         <pre
           className={cn(
-            "mx-2 mb-2 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border px-2 py-1.5 font-mono text-[10px]",
+            "max-h-24 shrink-0 overflow-auto border-t px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap",
             logOk === false ? "border-rose/30 bg-rose/10 text-rose" : "border-green/30 bg-green/10 text-green",
           )}
         >

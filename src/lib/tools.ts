@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { applyUnifiedDiff } from "./diff";
-import { isBinaryPath, isIgnoredName } from "./ignore";
+import { isBinaryPath } from "./ignore";
+import { searchWorkspace } from "./search";
 import { getWorkspaceRoot, listDir, pathExists, resolveSafe, toPosix } from "./workspace";
 
 const execFileAsync = promisify(execFile);
@@ -27,8 +28,6 @@ export type ToolResult = {
 const MAX_READ = 12_000;
 /** When the model omits end_line, only return this many lines (forces ranged reads). */
 const DEFAULT_READ_LINES = 400;
-const MAX_SEARCH_HITS = 80;
-const MAX_SEARCH_FILE_BYTES = 400_000;
 const MAX_TERMINAL_CHARS = 8_000;
 
 export const TOOL_SCHEMAS = [
@@ -72,6 +71,12 @@ export const TOOL_SCHEMAS = [
         properties: {
           query: { type: "string", description: "Regex or literal text to search for" },
           path_glob: { type: "string", description: "Optional glob like src/**/*.ts" },
+          case_sensitive: { type: "boolean", description: "Default false (case-insensitive)" },
+          use_regex: {
+            type: "boolean",
+            description: "Treat query as regex. Default true for the agent; UI may pass false for literal search.",
+          },
+          whole_word: { type: "boolean", description: "Match whole words only" },
         },
         required: ["query"],
       },
@@ -150,38 +155,6 @@ function formatRead(content: string, startLine = 1) {
     .join("\n");
 }
 
-function globToRegExp(glob: string) {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "::DS::")
-    .replace(/\*/g, "[^/]*")
-    .replace(/::DS::/g, ".*")
-    .replace(/\?/g, ".");
-  return new RegExp(`^${escaped}$`, "i");
-}
-
-async function walkFiles(root: string, dir: string, glob?: RegExp, out: string[] = []) {
-  let entries;
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const entry of entries) {
-    if (isIgnoredName(entry.name)) continue;
-    const abs = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      await walkFiles(root, abs, glob, out);
-      continue;
-    }
-    if (isBinaryPath(abs)) continue;
-    const rel = toPosix(root, abs);
-    if (glob && !glob.test(rel) && !glob.test(entry.name)) continue;
-    out.push(abs);
-  }
-  return out;
-}
-
 function blockedCommand(command: string) {
   const c = command.toLowerCase();
   const patterns = [
@@ -252,35 +225,22 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
       case "search_codebase": {
         const query = String(args.query ?? "");
         if (!query) return { ok: false, output: "query is required" };
-        let regex: RegExp;
-        try {
-          regex = new RegExp(query, "i");
-        } catch {
-          regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-        }
-        const glob = args.path_glob ? globToRegExp(String(args.path_glob)) : undefined;
-        const files = await walkFiles(root, root, glob);
-        const hits: string[] = [];
-        for (const file of files) {
-          if (hits.length >= MAX_SEARCH_HITS) break;
-          let content: string;
-          try {
-            const stat = await fs.stat(file);
-            if (stat.size > MAX_SEARCH_FILE_BYTES) continue;
-            content = await fs.readFile(file, "utf8");
-          } catch {
-            continue;
-          }
-          const lines = content.split(/\r?\n/);
-          for (let i = 0; i < lines.length; i++) {
-            if (!regex.test(lines[i])) continue;
-            hits.push(`${toPosix(root, file)}:${i + 1}: ${lines[i].trim()}`);
-            if (hits.length >= MAX_SEARCH_HITS) break;
-          }
-        }
+        const result = await searchWorkspace({
+          query,
+          pathGlob: args.path_glob ? String(args.path_glob) : undefined,
+          caseSensitive: Boolean(args.case_sensitive),
+          useRegex: args.use_regex === undefined ? true : Boolean(args.use_regex),
+          wholeWord: Boolean(args.whole_word),
+        });
+        if (result.error) return { ok: false, output: result.error };
+        const hits = result.hits.map((h) => `${h.path}:${h.line}: ${h.text.trim()}`);
+        const more =
+          result.truncated || result.total > hits.length
+            ? `\n… ${result.total} total match${result.total === 1 ? "" : "es"} (showing ${hits.length})`
+            : "";
         return {
           ok: true,
-          output: hits.length ? hits.join("\n") : "No matches.",
+          output: hits.length ? `${hits.join("\n")}${more}` : "No matches.",
         };
       }
       case "write_file": {

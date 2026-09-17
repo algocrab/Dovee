@@ -1,14 +1,26 @@
-import * as pty from "node-pty";
+import { createRequire } from "node:module";
+import type { IDisposable, IPty } from "node-pty";
 import { getWorkspaceRoot } from "./workspace";
+
+type PtyModule = typeof import("node-pty");
+
+let ptyModule: PtyModule | undefined;
+
+function loadPty(): PtyModule {
+  if (ptyModule) return ptyModule;
+  const require = createRequire(__filename);
+  ptyModule = require("node-pty") as PtyModule;
+  return ptyModule;
+}
 
 type ShellState = {
   id: string;
-  proc: pty.IPty;
+  proc: IPty;
   cwd: string;
   cols: number;
   rows: number;
   listeners: Set<(chunk: string) => void>;
-  subscriptions: pty.IDisposable[];
+  subscriptions: IDisposable[];
 };
 
 type ShellBag = Map<string, ShellState>;
@@ -92,7 +104,7 @@ function spawnShell(id: string, cwd: string, cols = DEFAULT_COLS, rows = DEFAULT
   const file = isWin ? "powershell.exe" : process.env.SHELL || "bash";
   const args = isWin ? ["-NoLogo", "-NoExit"] : ["-i"];
 
-  const proc = pty.spawn(file, args, {
+  const proc = loadPty().spawn(file, args, {
     name: "xterm-256color",
     cols,
     rows,

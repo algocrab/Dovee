@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { closeAllTabs, closeTabSafe, createNewFile, openFolder, openNewWindow, persistAppearance, pickOpenFile, saveAll, saveTab } from "./actions";
+import { closeAllTabs, closeTabSafe, createNewFile, formatActive, openFolder, openNewWindow, persistAppearance, pickOpenFile, saveAll, saveTab } from "./actions";
 import { openFile } from "./file-tree";
 import { useIde } from "@/stores/ide-store";
 
@@ -43,6 +43,7 @@ function CommandPaletteInner() {
       { id: "dusk", label: "Theme: Dusk", run: () => void persistAppearance({ theme: "dusk" }) },
       { id: "wrap", label: "Toggle Word Wrap", run: () => void persistAppearance({ wordWrap: !(g().settings?.wordWrap ?? true) }) },
       { id: "map", label: "Toggle Minimap", run: () => void persistAppearance({ minimap: !(g().settings?.minimap ?? false) }) },
+      { id: "format", label: "Format Document", run: () => void formatActive() },
       { id: "zoom-in", label: "Increase Font Size", run: () => void persistAppearance({ editorFontSize: Math.min(22, (g().settings?.editorFontSize ?? 15) + 1) }) },
       { id: "zoom-out", label: "Decrease Font Size", run: () => void persistAppearance({ editorFontSize: Math.max(11, (g().settings?.editorFontSize ?? 15) - 1) }) },
     ];

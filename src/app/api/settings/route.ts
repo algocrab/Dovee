@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 import { PROVIDERS } from "@/lib/providers";
 import { clampMaxToolRounds } from "@/lib/tool-rounds";
 import { loadSettings, publicSettings, saveSettings, type DoveeSettings } from "@/lib/settings";
-import { restartAllShells } from "@/lib/shell";
 
 export async function GET() {
   const settings = await loadSettings();
@@ -44,8 +43,22 @@ export async function POST(req: Request) {
   if (typeof body.wordWrap === "boolean") patch.wordWrap = body.wordWrap;
   if (typeof body.minimap === "boolean") patch.minimap = body.minimap;
   if (typeof body.autoSave === "boolean") patch.autoSave = body.autoSave;
+  if (typeof body.formatOnSave === "boolean") patch.formatOnSave = body.formatOnSave;
   if (typeof body.maxToolRounds === "number") patch.maxToolRounds = clampMaxToolRounds(body.maxToolRounds);
   const next = await saveSettings(patch);
-  if (patch.workspace) await restartAllShells();
+  if (patch.workspace) {
+    try {
+      const { restartAllShells } = await import("@/lib/shell");
+      await restartAllShells();
+    } catch {
+      /* node-pty is optional — folder open must still succeed without a terminal */
+    }
+    try {
+      const { resetWatcher } = await import("@/lib/watcher");
+      await resetWatcher();
+    } catch {
+      /* watcher is best-effort */
+    }
+  }
   return NextResponse.json(publicSettings(next));
 }

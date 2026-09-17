@@ -19,6 +19,7 @@ import { GitPanel } from "./git-panel";
 import { MenuBar } from "./menu-bar";
 import { SearchPanel } from "./search-panel";
 import { SettingsModal } from "./settings-modal";
+import { useFileWatcher } from "./use-file-watcher";
 
 const MonacoPane = dynamic(() => import("./monaco-pane").then((m) => m.MonacoPane), {
   ssr: false,
@@ -43,6 +44,7 @@ export function IdeShell() {
   const chordK = useRef(false);
   const chatsHydrated = useRef(false);
   useDesktopApp();
+  useFileWatcher(Boolean(settings?.hasFolder !== false));
 
   useEffect(() => {
     void (async () => {

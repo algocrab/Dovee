@@ -36,6 +36,7 @@ export type PublicSettings = {
   wordWrap: boolean;
   minimap: boolean;
   autoSave: boolean;
+  formatOnSave: boolean;
   maxToolRounds: number;
 };
 
@@ -48,7 +49,22 @@ export type Problem = {
   message: string;
 };
 
-type SearchHit = { path: string; line: number; text: string };
+/** A one-shot "jump the editor here" request (search hit, problem, go-to). */
+export type RevealTarget = {
+  path: string;
+  line: number;
+  column: number;
+  /** Bumped on every request so repeat jumps to the same line still fire. */
+  nonce: number;
+};
+
+export type SearchHit = {
+  path: string;
+  line: number;
+  text: string;
+  column?: number;
+  match?: string;
+};
 
 export function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -69,6 +85,7 @@ type IdeState = {
   tabs: Tab[];
   activePath: string | null;
   cursor: { line: number; column: number };
+  reveal: RevealTarget | null;
   leftTab: "explorer" | "search" | "git";
   agentOpen: boolean;
   terminalOpen: boolean;
@@ -95,6 +112,8 @@ type IdeState = {
   setTree: (e: TreeEntry[]) => void;
   setExpanded: (path: string, entries: TreeEntry[]) => void;
   setCursor: (line: number, column: number) => void;
+  revealIn: (path: string, line: number, column?: number) => void;
+  setSearch: (q: string, hits: SearchHit[]) => void;
   setLeftTab: (t: "explorer" | "search" | "git") => void;
   toggleAgent: () => void;
   toggleTerminal: () => void;
@@ -105,8 +124,9 @@ type IdeState = {
   setSidebarWidth: (n: number) => void;
   setBottomTab: (t: "terminal" | "problems") => void;
   setProblems: (p: Problem[]) => void;
-  patchAppearance: (p: Partial<Pick<PublicSettings, "theme" | "editorFontSize" | "wordWrap" | "minimap" | "autoSave">>) => void;
-  setSearch: (q: string, hits: SearchHit[]) => void;
+  patchAppearance: (
+    p: Partial<Pick<PublicSettings, "theme" | "editorFontSize" | "wordWrap" | "minimap" | "autoSave" | "formatOnSave">>,
+  ) => void;
   setFileIndex: (files: string[]) => void;
   setGitBranch: (branch: string) => void;
   openTab: (tab: Tab) => void;
@@ -145,6 +165,7 @@ export const useIde = create<IdeState>((set, get) => ({
   tabs: [],
   activePath: null,
   cursor: { line: 1, column: 1 },
+  reveal: null,
   leftTab: "explorer",
   agentOpen: true,
   terminalOpen: false,
@@ -172,6 +193,8 @@ export const useIde = create<IdeState>((set, get) => ({
   setExpanded: (path, entries) =>
     set((s) => ({ expanded: { ...s.expanded, [path]: entries } })),
   setCursor: (line, column) => set({ cursor: { line, column } }),
+  revealIn: (path, line, column = 1) =>
+    set((s) => ({ reveal: { path, line, column, nonce: (s.reveal?.nonce ?? 0) + 1 } })),
   setLeftTab: (leftTab) => set({ leftTab }),
   toggleAgent: () => set((s) => ({ agentOpen: !s.agentOpen })),
   toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
