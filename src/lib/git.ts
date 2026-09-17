@@ -14,6 +14,7 @@ async function git(args: string[], cwd: string) {
       timeout: 120_000,
       windowsHide: true,
       maxBuffer: 4_000_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     });
     return { ok: true as const, stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (error) {
@@ -21,6 +22,28 @@ async function git(args: string[], cwd: string) {
     const message = [err.stderr, err.stdout, err.message].filter(Boolean).join("\n").trim();
     return { ok: false as const, stdout: err.stdout ?? "", stderr: message };
   }
+}
+
+function parseLog(stdout: string): GitCommit[] {
+  return stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const [hash, short, author, date, ...subject] = line.split("\t");
+      return { hash, short, author, date, subject: subject.join("\t") };
+    });
+}
+
+const LOG_FMT = ["--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s", "--date=iso-strict"] as const;
+
+async function unpushedCommits(cwd: string): Promise<GitCommit[]> {
+  const upstream = await git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd);
+  const range = upstream.ok ? `${upstream.stdout.trim()}..HEAD` : "origin/HEAD..HEAD";
+  const result = await git(["log", range, ...LOG_FMT], cwd);
+  if (result.ok) return parseLog(result.stdout);
+  const fallback = await git(["log", "origin/main..HEAD", ...LOG_FMT], cwd);
+  if (fallback.ok) return parseLog(fallback.stdout);
+  return [];
 }
 
 function labelFor(index: string, worktree: string) {
@@ -37,7 +60,16 @@ export async function gitStatus(): Promise<GitStatus> {
   const cwd = await getWorkspaceRoot();
   const inside = await git(["rev-parse", "--is-inside-work-tree"], cwd);
   if (!inside.ok || inside.stdout.trim() !== "true") {
-    return { isRepo: false, branch: "", upstream: null, ahead: 0, behind: 0, remote: null, files: [] };
+    return {
+      isRepo: false,
+      branch: "",
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      remote: null,
+      files: [],
+      unpushed: [],
+    };
   }
 
   const [sb, remote] = await Promise.all([
@@ -68,14 +100,18 @@ export async function gitStatus(): Promise<GitStatus> {
     });
   }
 
+  const unpushed = await unpushedCommits(cwd);
+  const aheadCount = ahead || unpushed.length;
+
   return {
     isRepo: true,
     branch,
     upstream,
-    ahead,
+    ahead: aheadCount,
     behind,
     remote: remote.ok ? remote.stdout.trim() : null,
     files,
+    unpushed,
   };
 }
 
@@ -86,13 +122,18 @@ export async function gitLog(limit = 40): Promise<GitCommit[]> {
     cwd,
   );
   if (!result.ok) return [];
-  return result.stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      const [hash, short, author, date, ...subject] = line.split("\t");
-      return { hash, short, author, date, subject: subject.join("\t") };
-    });
+  return parseLog(result.stdout);
+}
+
+export async function gitCommitAndPush(message: string) {
+  const commit = await gitCommit(message);
+  if (!commit.ok) return commit;
+  const push = await gitPush();
+  return {
+    ok: push.ok,
+    stdout: [commit.stdout, push.stdout].filter(Boolean).join("\n"),
+    stderr: [commit.stderr, push.stderr].filter(Boolean).join("\n"),
+  };
 }
 
 export async function gitInit() {

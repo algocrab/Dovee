@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { gitCommit, gitInit, gitLog, gitPull, gitPush, gitSetRemote, gitStatus } from "@/lib/git";
+import { gitCommit, gitCommitAndPush, gitInit, gitLog, gitPull, gitPush, gitSetRemote, gitStatus } from "@/lib/git";
 
 export async function GET(req: Request) {
   const view = new URL(req.url).searchParams.get("view") || "status";
@@ -32,6 +32,11 @@ export async function POST(req: Request) {
       return NextResponse.json(await gitCommit(message));
     }
     if (body.action === "push") return NextResponse.json(await gitPush());
+    if (body.action === "commit-push") {
+      const message = body.message?.trim();
+      if (!message) return NextResponse.json({ ok: false, stderr: "Commit message required" }, { status: 400 });
+      return NextResponse.json(await gitCommitAndPush(message));
+    }
     if (body.action === "pull") return NextResponse.json(await gitPull());
     if (body.action === "remote") {
       const url = body.url?.trim();

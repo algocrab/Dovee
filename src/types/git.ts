@@ -5,6 +5,14 @@ export type GitFile = {
   label: string;
 };
 
+export type GitCommit = {
+  hash: string;
+  short: string;
+  author: string;
+  date: string;
+  subject: string;
+};
+
 export type GitStatus = {
   isRepo: boolean;
   branch: string;
@@ -13,12 +21,5 @@ export type GitStatus = {
   behind: number;
   remote: string | null;
   files: GitFile[];
-};
-
-export type GitCommit = {
-  hash: string;
-  short: string;
-  author: string;
-  date: string;
-  subject: string;
+  unpushed: GitCommit[];
 };
