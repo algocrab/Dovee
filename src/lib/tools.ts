@@ -288,12 +288,17 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
         const cwdRel = args.cwd ? String(args.cwd) : ".";
         const cwd = resolveSafe(root, cwdRel);
         try {
-          const { stdout, stderr } = await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
-            cwd,
-            timeout: 180_000,
-            maxBuffer: 2_000_000,
-            windowsHide: true,
-          });
+          const isWin = process.platform === "win32";
+          const { stdout, stderr } = await execFileAsync(
+            isWin ? "powershell.exe" : "bash",
+            isWin ? ["-NoProfile", "-NonInteractive", "-Command", command] : ["-lc", command],
+            {
+              cwd,
+              timeout: 180_000,
+              maxBuffer: 2_000_000,
+              windowsHide: true,
+            },
+          );
           const text = [stdout, stderr].filter(Boolean).join("\n").trim();
           return { ok: true, output: text || "(no output)" };
         } catch (error) {

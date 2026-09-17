@@ -26,6 +26,18 @@ export type ChatMsg = {
   tools: ToolCard[];
 };
 
+export type AgentChat = {
+  id: string;
+  title: string;
+  messages: ChatMsg[];
+  streaming: boolean;
+};
+
+export type TermTab = {
+  id: string;
+  name: string;
+};
+
 export type PublicSettings = {
   model: "deepseek-flash" | "deepseek-v4-pro";
   reasoningEffort: "none" | "low" | "high" | "max";
@@ -37,6 +49,18 @@ export type PublicSettings = {
 
 type SearchHit = { path: string; line: number; text: string };
 
+export function uid() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeChat(n: number): AgentChat {
+  return { id: uid(), title: n <= 1 ? "New chat" : `Chat ${n}`, messages: [], streaming: false };
+}
+
+function patchChat(chats: AgentChat[], id: string, fn: (c: AgentChat) => AgentChat) {
+  return chats.map((c) => (c.id === id ? fn(c) : c));
+}
+
 type IdeState = {
   settings: PublicSettings | null;
   tree: TreeEntry[];
@@ -44,7 +68,7 @@ type IdeState = {
   tabs: Tab[];
   activePath: string | null;
   cursor: { line: number; column: number };
-  leftTab: "explorer" | "search";
+  leftTab: "explorer" | "search" | "git";
   agentOpen: boolean;
   terminalOpen: boolean;
   terminalHeight: number;
@@ -54,14 +78,17 @@ type IdeState = {
   searchQuery: string;
   searchHits: SearchHit[];
   fileIndex: string[];
-  messages: ChatMsg[];
-  streaming: boolean;
+  chats: AgentChat[];
+  activeChatId: string;
+  termTabs: TermTab[];
+  activeTermId: string;
+  gitBranch: string;
   status: string;
   setSettings: (s: PublicSettings) => void;
   setTree: (e: TreeEntry[]) => void;
   setExpanded: (path: string, entries: TreeEntry[]) => void;
   setCursor: (line: number, column: number) => void;
-  setLeftTab: (t: "explorer" | "search") => void;
+  setLeftTab: (t: "explorer" | "search" | "git") => void;
   toggleAgent: () => void;
   toggleTerminal: () => void;
   setTerminalHeight: (n: number) => void;
@@ -70,26 +97,31 @@ type IdeState = {
   setCommandOpen: (v: boolean) => void;
   setSearch: (q: string, hits: SearchHit[]) => void;
   setFileIndex: (files: string[]) => void;
+  setGitBranch: (branch: string) => void;
   openTab: (tab: Tab) => void;
   closeTab: (path: string) => void;
   setActive: (path: string) => void;
   updateContent: (path: string, content: string) => void;
   markSaved: (path: string) => void;
   reloadTab: (path: string, content: string) => void;
-  addUserMessage: (content: string) => string;
-  ensureAssistant: () => string;
-  appendThinking: (text: string) => void;
-  appendContent: (text: string) => void;
-  startTool: (card: ToolCard) => void;
-  finishTool: (id: string, ok: boolean, output: string) => void;
-  setStreaming: (v: boolean) => void;
+  setActiveChat: (id: string) => void;
+  newChat: () => string;
+  closeChat: (id: string) => void;
+  addUserMessage: (chatId: string, content: string) => string;
+  ensureAssistant: (chatId: string) => string;
+  appendThinking: (chatId: string, text: string) => void;
+  appendContent: (chatId: string, text: string) => void;
+  startTool: (chatId: string, card: ToolCard) => void;
+  finishTool: (chatId: string, id: string, ok: boolean, output: string) => void;
+  setChatStreaming: (chatId: string, v: boolean) => void;
   setStatus: (s: string) => void;
-  newChat: () => void;
+  addTerminal: () => string;
+  setActiveTerm: (id: string) => void;
+  closeTerminal: (id: string) => void;
 };
 
-function uid() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
+const firstChat = makeChat(1);
+const firstTerm: TermTab = { id: "term-1", name: "powershell" };
 
 export const useIde = create<IdeState>((set, get) => ({
   settings: null,
@@ -108,8 +140,11 @@ export const useIde = create<IdeState>((set, get) => ({
   searchQuery: "",
   searchHits: [],
   fileIndex: [],
-  messages: [],
-  streaming: false,
+  chats: [firstChat],
+  activeChatId: firstChat.id,
+  termTabs: [firstTerm],
+  activeTermId: firstTerm.id,
+  gitBranch: "",
   status: "Ready",
   setSettings: (settings) => set({ settings }),
   setTree: (tree) => set({ tree }),
@@ -125,6 +160,7 @@ export const useIde = create<IdeState>((set, get) => ({
   setCommandOpen: (commandOpen) => set({ commandOpen }),
   setSearch: (searchQuery, searchHits) => set({ searchQuery, searchHits }),
   setFileIndex: (fileIndex) => set({ fileIndex }),
+  setGitBranch: (gitBranch) => set({ gitBranch }),
   openTab: (tab) =>
     set((s) => {
       const exists = s.tabs.some((t) => t.path === tab.path);
@@ -155,64 +191,120 @@ export const useIde = create<IdeState>((set, get) => ({
         t.path === path ? { ...t, content, original: content } : t,
       ),
     })),
-  addUserMessage: (content) => {
+  setActiveChat: (activeChatId) => set({ activeChatId, agentOpen: true }),
+  newChat: () => {
+    const chat = makeChat(get().chats.length + 1);
+    set((s) => ({
+      chats: [...s.chats, chat],
+      activeChatId: chat.id,
+      agentOpen: true,
+    }));
+    return chat.id;
+  },
+  closeChat: (id) =>
+    set((s) => {
+      if (s.chats.length <= 1) {
+        const chat = makeChat(1);
+        return { chats: [chat], activeChatId: chat.id };
+      }
+      const chats = s.chats.filter((c) => c.id !== id);
+      const activeChatId = s.activeChatId === id ? chats[chats.length - 1].id : s.activeChatId;
+      return { chats, activeChatId };
+    }),
+  addUserMessage: (chatId, content) => {
     const id = uid();
     set((s) => ({
-      messages: [...s.messages, { id, role: "user", content, tools: [] }],
+      chats: patchChat(s.chats, chatId, (c) => ({
+        ...c,
+        title: c.messages.length === 0 ? content.slice(0, 32) : c.title,
+        messages: [...c.messages, { id, role: "user", content, tools: [] }],
+      })),
     }));
     return id;
   },
-  ensureAssistant: () => {
-    const last = get().messages[get().messages.length - 1];
-    if (last?.role === "assistant" && get().streaming) return last.id;
+  ensureAssistant: (chatId) => {
+    const chat = get().chats.find((c) => c.id === chatId);
+    const last = chat?.messages[chat.messages.length - 1];
+    if (last?.role === "assistant" && chat?.streaming) return last.id;
     const id = uid();
     set((s) => ({
-      messages: [...s.messages, { id, role: "assistant", content: "", thinking: "", tools: [] }],
+      chats: patchChat(s.chats, chatId, (c) => ({
+        ...c,
+        messages: [...c.messages, { id, role: "assistant", content: "", thinking: "", tools: [] }],
+      })),
     }));
     return id;
   },
-  appendThinking: (text) =>
-    set((s) => {
-      const messages = [...s.messages];
-      const last = messages[messages.length - 1];
-      if (last?.role === "assistant") {
-        messages[messages.length - 1] = { ...last, thinking: (last.thinking || "") + text };
-      }
-      return { messages };
-    }),
-  appendContent: (text) =>
-    set((s) => {
-      const messages = [...s.messages];
-      const last = messages[messages.length - 1];
-      if (last?.role === "assistant") {
-        messages[messages.length - 1] = { ...last, content: last.content + text };
-      }
-      return { messages };
-    }),
-  startTool: (card) =>
-    set((s) => {
-      const messages = [...s.messages];
-      const last = messages[messages.length - 1];
-      if (last?.role === "assistant") {
-        messages[messages.length - 1] = { ...last, tools: [...last.tools, card] };
-      }
-      return { messages };
-    }),
-  finishTool: (id, ok, output) =>
-    set((s) => {
-      const messages = [...s.messages];
-      const last = messages[messages.length - 1];
-      if (last?.role === "assistant") {
-        messages[messages.length - 1] = {
-          ...last,
-          tools: last.tools.map((t) =>
-            t.id === id ? { ...t, ok, output, status: ok ? "done" : "error" } : t,
-          ),
-        };
-      }
-      return { messages };
-    }),
-  setStreaming: (streaming) => set({ streaming }),
+  appendThinking: (chatId, text) =>
+    set((s) => ({
+      chats: patchChat(s.chats, chatId, (c) => {
+        const messages = [...c.messages];
+        const last = messages[messages.length - 1];
+        if (last?.role === "assistant") {
+          messages[messages.length - 1] = { ...last, thinking: (last.thinking || "") + text };
+        }
+        return { ...c, messages };
+      }),
+    })),
+  appendContent: (chatId, text) =>
+    set((s) => ({
+      chats: patchChat(s.chats, chatId, (c) => {
+        const messages = [...c.messages];
+        const last = messages[messages.length - 1];
+        if (last?.role === "assistant") {
+          messages[messages.length - 1] = { ...last, content: last.content + text };
+        }
+        return { ...c, messages };
+      }),
+    })),
+  startTool: (chatId, card) =>
+    set((s) => ({
+      chats: patchChat(s.chats, chatId, (c) => {
+        const messages = [...c.messages];
+        const last = messages[messages.length - 1];
+        if (last?.role === "assistant") {
+          messages[messages.length - 1] = { ...last, tools: [...last.tools, card] };
+        }
+        return { ...c, messages };
+      }),
+    })),
+  finishTool: (chatId, id, ok, output) =>
+    set((s) => ({
+      chats: patchChat(s.chats, chatId, (c) => {
+        const messages = [...c.messages];
+        const last = messages[messages.length - 1];
+        if (last?.role === "assistant") {
+          messages[messages.length - 1] = {
+            ...last,
+            tools: last.tools.map((t) =>
+              t.id === id ? { ...t, ok, output, status: ok ? "done" : "error" } : t,
+            ),
+          };
+        }
+        return { ...c, messages };
+      }),
+    })),
+  setChatStreaming: (chatId, streaming) =>
+    set((s) => ({
+      chats: patchChat(s.chats, chatId, (c) => ({ ...c, streaming })),
+    })),
   setStatus: (status) => set({ status }),
-  newChat: () => set({ messages: [], streaming: false }),
+  addTerminal: () => {
+    const id = `term-${uid()}`;
+    const n = get().termTabs.length + 1;
+    set((s) => ({
+      termTabs: [...s.termTabs, { id, name: `powershell ${n}` }],
+      activeTermId: id,
+      terminalOpen: true,
+    }));
+    return id;
+  },
+  setActiveTerm: (activeTermId) => set({ activeTermId, terminalOpen: true }),
+  closeTerminal: (id) =>
+    set((s) => {
+      if (s.termTabs.length <= 1) return s;
+      const termTabs = s.termTabs.filter((t) => t.id !== id);
+      const activeTermId = s.activeTermId === id ? termTabs[termTabs.length - 1].id : s.activeTermId;
+      return { termTabs, activeTermId };
+    }),
 }));

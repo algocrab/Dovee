@@ -8,7 +8,6 @@ dist
 .dovee
 *.log
 .DS_Store
-next-env.d.ts
 
 
 #Ignore cursor AI rules

@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronRight, File, Folder, FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { cn } from "@/lib/cn";
 import { useIde, type TreeEntry } from "@/stores/ide-store";
 
@@ -35,7 +35,7 @@ function Node({ entry, depth }: { entry: TreeEntry; depth: number }) {
   const expanded = useIde((s) => s.expanded[entry.path]);
   const activePath = useIde((s) => s.activePath);
   const isDir = entry.type === "dir";
-  const open = Boolean(expanded);
+  const open = Array.isArray(expanded);
 
   async function toggle() {
     if (!isDir) {
@@ -43,7 +43,6 @@ function Node({ entry, depth }: { entry: TreeEntry; depth: number }) {
       return;
     }
     if (open) {
-      useIde.getState().setExpanded(entry.path, []);
       const next = { ...useIde.getState().expanded };
       delete next[entry.path];
       useIde.setState({ expanded: next });
@@ -53,7 +52,7 @@ function Node({ entry, depth }: { entry: TreeEntry; depth: number }) {
     useIde.getState().setExpanded(entry.path, entries);
   }
 
-  async function remove(e: React.MouseEvent) {
+  async function remove(e: MouseEvent) {
     e.stopPropagation();
     if (!confirm(`Delete ${entry.path}?`)) return;
     await fetch("/api/files/delete", {

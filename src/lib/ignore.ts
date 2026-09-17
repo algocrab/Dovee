@@ -14,6 +14,7 @@ export const IGNORE_DIRS = new Set([
   ".dovee",
   ".idea",
   ".vscode",
+  ".cursor",
 ]);
 
 export const BINARY_EXTS = new Set([

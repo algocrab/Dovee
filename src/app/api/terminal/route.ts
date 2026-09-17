@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
-import { restartShell, subscribeShell, writeShell } from "@/lib/shell";
+import { killShell, restartShell, subscribeShell, writeShell } from "@/lib/shell";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function termId(req: Request, body?: { id?: string }) {
+  const fromQuery = new URL(req.url).searchParams.get("id");
+  return body?.id || fromQuery || "term-1";
+}
+
 export async function GET(req: Request) {
+  const id = termId(req);
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -15,8 +21,8 @@ export async function GET(req: Request) {
           /* closed */
         }
       };
-      const unsub = await subscribeShell(send);
-      send("\x1b[38;2;125;211;192mDovee shell\x1b[0m — PowerShell in workspace\r\n");
+      const unsub = await subscribeShell(id, send);
+      send(`\x1b[38;2;125;211;192mDovee shell\x1b[0m — ${id}\r\n`);
       const timer = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(`: ping\n\n`));
@@ -48,13 +54,23 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { data?: string; restart?: boolean };
+  const body = (await req.json()) as {
+    id?: string;
+    data?: string;
+    restart?: boolean;
+    kill?: boolean;
+  };
+  const id = termId(req, body);
+  if (body.kill) {
+    await killShell(id);
+    return NextResponse.json({ ok: true, killed: true });
+  }
   if (body.restart) {
-    await restartShell();
+    await restartShell(id);
     return NextResponse.json({ ok: true, restarted: true });
   }
   if (typeof body.data === "string") {
-    await writeShell(body.data);
+    await writeShell(id, body.data);
   }
   return NextResponse.json({ ok: true });
 }

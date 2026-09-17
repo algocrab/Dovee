@@ -2,12 +2,20 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { getWorkspaceRoot } from "./workspace";
 
 type ShellState = {
+  id: string;
   proc: ChildProcessWithoutNullStreams;
   cwd: string;
   listeners: Set<(chunk: string) => void>;
 };
 
-const g = globalThis as typeof globalThis & { __doveeShell?: ShellState };
+type ShellBag = Map<string, ShellState>;
+
+const g = globalThis as typeof globalThis & { __doveeShells?: ShellBag };
+
+function shells() {
+  if (!g.__doveeShells) g.__doveeShells = new Map();
+  return g.__doveeShells;
+}
 
 function attach(state: ShellState) {
   state.proc.stdout.on("data", (buf: Buffer) => {
@@ -21,47 +29,60 @@ function attach(state: ShellState) {
   state.proc.on("exit", (code) => {
     const text = `\r\n[shell exited ${code ?? "null"}]\r\n`;
     for (const listener of state.listeners) listener(text);
-    if (g.__doveeShell === state) g.__doveeShell = undefined;
+    shells().delete(state.id);
   });
 }
 
-export async function getShell() {
-  const cwd = await getWorkspaceRoot();
-  const existing = g.__doveeShell;
-  if (existing && !existing.proc.killed && existing.cwd === cwd) return existing;
-
-  if (existing && !existing.proc.killed) {
-    existing.proc.kill();
-  }
-
-  const proc = spawn("powershell.exe", ["-NoLogo", "-NoExit"], {
-    cwd,
-    env: { ...process.env },
-    windowsHide: true,
-  });
-
-  const state: ShellState = { proc, cwd, listeners: new Set() };
+function spawnShell(id: string, cwd: string) {
+  const isWin = process.platform === "win32";
+  const proc = isWin
+    ? spawn("powershell.exe", ["-NoLogo", "-NoExit"], { cwd, env: { ...process.env }, windowsHide: true })
+    : spawn("bash", ["-i"], { cwd, env: { ...process.env } });
+  const state: ShellState = { id, proc, cwd, listeners: new Set() };
   attach(state);
-  g.__doveeShell = state;
+  shells().set(id, state);
   return state;
 }
 
-export async function writeShell(data: string) {
-  const shell = await getShell();
+export async function getShell(id: string) {
+  const cwd = await getWorkspaceRoot();
+  const existing = shells().get(id);
+  if (existing && !existing.proc.killed && existing.cwd === cwd) return existing;
+  if (existing && !existing.proc.killed) existing.proc.kill();
+  return spawnShell(id, cwd);
+}
+
+export async function writeShell(id: string, data: string) {
+  const shell = await getShell(id);
   shell.proc.stdin.write(data);
 }
 
-export async function subscribeShell(listener: (chunk: string) => void) {
-  const shell = await getShell();
+export async function subscribeShell(id: string, listener: (chunk: string) => void) {
+  const shell = await getShell(id);
   shell.listeners.add(listener);
   return () => {
     shell.listeners.delete(listener);
   };
 }
 
-export async function restartShell() {
-  const existing = g.__doveeShell;
+export async function restartShell(id: string) {
+  const existing = shells().get(id);
   if (existing && !existing.proc.killed) existing.proc.kill();
-  g.__doveeShell = undefined;
-  return getShell();
+  shells().delete(id);
+  return getShell(id);
+}
+
+export async function killShell(id: string) {
+  const existing = shells().get(id);
+  if (existing && !existing.proc.killed) existing.proc.kill();
+  shells().delete(id);
+}
+
+export async function restartAllShells() {
+  const cwd = await getWorkspaceRoot();
+  for (const [id, state] of shells()) {
+    if (!state.proc.killed) state.proc.kill();
+    shells().delete(id);
+    spawnShell(id, cwd);
+  }
 }

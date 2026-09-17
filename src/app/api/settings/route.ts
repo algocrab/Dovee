@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadSettings, publicSettings, saveSettings, type DoveeSettings } from "@/lib/settings";
-import { restartShell } from "@/lib/shell";
+import { restartAllShells } from "@/lib/shell";
 
 export async function GET() {
   const settings = await loadSettings();
@@ -22,6 +22,6 @@ export async function POST(req: Request) {
     patch.baseUrl = body.baseUrl.trim();
   }
   const next = await saveSettings(patch);
-  if (patch.workspace) await restartShell();
+  if (patch.workspace) await restartAllShells();
   return NextResponse.json(publicSettings(next));
 }
