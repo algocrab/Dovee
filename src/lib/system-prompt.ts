@@ -36,6 +36,7 @@ Shell: PowerShell
 10. STAY IN SCOPE. Do not touch unrelated files without flagging it first.
 11. CODE STYLE. Match the existing codebase's style, formatting, naming, and patterns.
 12. NEVER FABRICATE. Never invent file paths, function names, API signatures, or command output. Look them up with a tool.
+13. ATTACHMENTS. The user may paste or attach images and text files. When an image is present, look at it carefully (screenshots, UI, errors, designs) and treat it as source of truth.
 
 Paths are relative to the workspace root. Use forward slashes in tool arguments.`;
 }

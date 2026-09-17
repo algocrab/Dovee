@@ -6,6 +6,15 @@ import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
 import { EditorWelcome } from "./chrome";
 
+function appearanceOptions(fontSize: number, wordWrap: boolean, minimap: boolean) {
+  return {
+    fontSize,
+    lineHeight: Math.round(fontSize * 1.55),
+    minimap: { enabled: minimap },
+    wordWrap: (wordWrap ? "on" : "off") as "on" | "off",
+  };
+}
+
 function defineThemes(monaco: Parameters<OnMount>[1]) {
   monaco.editor.defineTheme("dovee-dark", {
     base: "vs-dark",
@@ -83,17 +92,29 @@ export function MonacoPane() {
   const minimap = useIde((s) => s.settings?.minimap ?? false);
   const tab = tabs.find((t) => t.path === activePath);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
   useEffect(() => {
     monacoRef.current?.editor.setTheme(MONACO_THEME[theme]);
   }, [theme]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
+  }, [fontSize, wordWrap, minimap]);
+
   const onMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
     monacoRef.current = monaco;
     defineThemes(monaco);
     monaco.editor.setTheme(MONACO_THEME[theme]);
+    editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
     editor.onDidChangeCursorPosition((e) => {
       setCursor(e.position.lineNumber, e.position.column);
+    });
+    editor.onDidDispose(() => {
+      if (editorRef.current === editor) editorRef.current = null;
     });
   };
 
@@ -112,10 +133,7 @@ export function MonacoPane() {
       onMount={onMount}
       options={{
         fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-        fontSize,
-        lineHeight: Math.round(fontSize * 1.55),
-        minimap: { enabled: minimap },
-        wordWrap: wordWrap ? "on" : "off",
+        ...appearanceOptions(fontSize, wordWrap, minimap),
         scrollBeyondLastLine: false,
         automaticLayout: true,
         padding: { top: 12 },

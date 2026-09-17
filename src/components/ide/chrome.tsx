@@ -1,39 +1,21 @@
 "use client";
 
-import { useId, type ReactNode } from "react";
+import Image from "next/image";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useIde } from "@/stores/ide-store";
 
 export function DoveeMark({ className, size = 22 }: { className?: string; size?: number }) {
-  const uid = useId().replace(/:/g, "");
-  const light = `doveGrad-${uid}`;
-  const dark = `doveGradDark-${uid}`;
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="15 10 210 160"
+    <Image
+      src="/dovee-logo.svg"
+      alt="Dovee"
       width={size}
-      height={size * 0.76}
-      className={cn("shrink-0", className)}
-      role="img"
-      aria-label="Dovee"
-    >
-      <title>Dovee</title>
-      <defs>
-        <linearGradient id={light} x1="20%" y1="15%" x2="90%" y2="85%">
-          <stop offset="0%" stopColor="#6C63FF" />
-          <stop offset="100%" stopColor="#38BDF8" />
-        </linearGradient>
-        <linearGradient id={dark} x1="20%" y1="15%" x2="90%" y2="85%">
-          <stop offset="0%" stopColor="#5347E0" />
-          <stop offset="100%" stopColor="#1FA1E0" />
-        </linearGradient>
-      </defs>
-      <polygon points="210,95 185,78 140,85 70,115 35,140 75,132 130,150 178,108" fill={`url(#${light})`} />
-      <polygon points="140,85 90,25 155,120" fill={`url(#${light})`} />
-      <polygon points="155,120 90,25 120,100" fill={`url(#${dark})`} />
-      <circle cx="190" cy="90" r="3.4" fill="#12131A" />
-    </svg>
+      height={Math.round(size * 0.76)}
+      className={cn("shrink-0 object-contain", className)}
+      draggable={false}
+      unoptimized
+    />
   );
 }
 

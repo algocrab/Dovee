@@ -1,9 +1,13 @@
 import { getProvider, type ProviderId } from "./providers";
 import type { DoveeSettings } from "./settings";
 
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" | "original" } };
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string | null;
+  content?: string | ContentPart[] | null;
   name?: string;
   tool_call_id?: string;
   reasoning_content?: string | null;
@@ -142,6 +146,22 @@ async function* parseOpenAiStream(response: Response): AsyncGenerator<StreamDelt
   }
 }
 
+function toAnthropicUserContent(content: ChatMessage["content"]) {
+  if (!Array.isArray(content)) return content || "";
+  return content.map((part) => {
+    if (part.type === "text") return { type: "text", text: part.text };
+    const url = part.image_url.url;
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(url);
+    if (match) {
+      return {
+        type: "image",
+        source: { type: "base64", media_type: match[1], data: match[2] },
+      };
+    }
+    return { type: "image", source: { type: "url", url } };
+  });
+}
+
 function toAnthropicMessages(messages: ChatMessage[]) {
   const out: Array<{ role: string; content: unknown }> = [];
   let i = 0;
@@ -152,7 +172,7 @@ function toAnthropicMessages(messages: ChatMessage[]) {
       continue;
     }
     if (m.role === "user") {
-      out.push({ role: "user", content: m.content || "" });
+      out.push({ role: "user", content: toAnthropicUserContent(m.content) });
       i += 1;
       continue;
     }

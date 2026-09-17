@@ -22,6 +22,12 @@ export function applyTheme(theme: ThemeId) {
   }
 }
 
+export function applyEditorFontSize(px: number) {
+  if (typeof document === "undefined") return;
+  const size = Math.min(22, Math.max(11, Math.round(px)));
+  document.documentElement.style.setProperty("--editor-font-size", `${size}px`);
+}
+
 export const XTERM_THEMES: Record<ThemeId, { background: string; foreground: string; cursor: string; selectionBackground: string }> = {
   dark: {
     background: "#0c0d12",

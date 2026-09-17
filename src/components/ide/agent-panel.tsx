@@ -1,11 +1,12 @@
 "use client";
 
-import { Loader2, Plus, Square, WandSparkles, X } from "lucide-react";
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { Loader2, Paperclip, Plus, Square, WandSparkles, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type MutableRefObject } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/cn";
-import { useIde, type ChatMsg, type ToolCard } from "@/stores/ide-store";
+import { ACCEPT_FILES, filesToAttachments, userApiContent } from "@/lib/chat-attachments";
+import { useIde, type ChatAttachment, type ChatMsg, type ToolCard } from "@/stores/ide-store";
 import { openFile, refreshRoot } from "./file-tree";
 
 function ToolRow({ tool }: { tool: ToolCard }) {
@@ -39,9 +40,29 @@ function ToolRow({ tool }: { tool: ToolCard }) {
 
 function Message({ msg }: { msg: ChatMsg }) {
   if (msg.role === "user") {
+    const images = msg.attachments?.filter((a) => a.kind === "image" && a.dataUrl) ?? [];
+    const files = msg.attachments?.filter((a) => a.kind === "text") ?? [];
     return (
-      <div className="ml-6 rounded-xl border border-line bg-bg-3/80 px-3 py-2 text-[13px] leading-relaxed">
-        {msg.content}
+      <div className="ml-6 space-y-2 rounded-xl border border-line bg-bg-3/80 px-3 py-2 text-[13px] leading-relaxed">
+        {msg.content ? <div className="whitespace-pre-wrap">{msg.content}</div> : null}
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {images.map((image) => (
+              // biome-ignore lint/performance/noImgElement: pasted/attached data URLs cannot use next/image
+              <img
+                key={image.id}
+                src={image.dataUrl}
+                alt={image.name}
+                className="max-h-40 max-w-full rounded-lg border border-line object-contain"
+              />
+            ))}
+          </div>
+        )}
+        {files.map((file) => (
+          <p key={file.id} className="font-mono text-[11px] text-muted">
+            {file.name}
+          </p>
+        ))}
       </div>
     );
   }
@@ -73,21 +94,42 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
   const streaming = chat?.streaming ?? false;
   const hasKey = useIde((s) => s.settings?.hasApiKey);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState<Record<string, ChatAttachment[]>>({});
+  const [dragging, setDragging] = useState(false);
   const draft = drafts[activeChatId] ?? "";
+  const attachments = pending[activeChatId] ?? [];
   const scroller = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const pendingRef = useRef(pending);
+
+  useEffect(() => {
+    pendingRef.current = pending;
+  }, [pending]);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [chat?.messages, chat?.streaming, activeChatId]);
 
+  const addFiles = useCallback(async (fileList: File[]) => {
+    if (!fileList.length) return;
+    const chatId = useIde.getState().activeChatId;
+    const existing = pendingRef.current[chatId]?.length ?? 0;
+    const { attachments: added, errors } = await filesToAttachments(fileList, existing);
+    if (errors[0]) useIde.getState().setStatus(errors[0]);
+    if (!added.length) return;
+    setPending((current) => ({ ...current, [chatId]: [...(current[chatId] ?? []), ...added] }));
+  }, []);
+
   async function send() {
     const text = draft.trim();
     const chatId = useIde.getState().activeChatId;
     const current = useIde.getState().chats.find((c) => c.id === chatId);
-    if (!text || !chatId || current?.streaming) return;
+    const files = pendingRef.current[chatId] ?? [];
+    if ((!text && files.length === 0) || !chatId || current?.streaming) return;
     setDrafts((d) => ({ ...d, [chatId]: "" }));
+    setPending((p) => ({ ...p, [chatId]: [] }));
     const store = useIde.getState();
-    store.addUserMessage(chatId, text);
+    store.addUserMessage(chatId, text, files);
     store.ensureAssistant(chatId);
     store.setChatStreaming(chatId, true);
     store.setStatus("Dovee is working…");
@@ -96,7 +138,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
     const after = useIde.getState().chats.find((c) => c.id === chatId);
     for (const m of (after?.messages ?? []).slice(0, -1)) {
       if (m.role === "user") {
-        history.push({ role: "user", content: m.content });
+        history.push({ role: "user", content: userApiContent(m.content, m.attachments) });
         continue;
       }
       history.push({
@@ -196,6 +238,48 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
     abortRef.current.get(id)?.abort();
   }
 
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files: File[] = [];
+    for (const item of event.clipboardData?.items ?? []) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (!files.length && event.clipboardData?.files?.length) {
+      files.push(...Array.from(event.clipboardData.files));
+    }
+    if (!files.length) return;
+    event.preventDefault();
+    const pasted = event.clipboardData.getData("text/plain");
+    if (pasted) {
+      setDrafts((d) => ({
+        ...d,
+        [activeChatId]: `${d[activeChatId] ?? ""}${pasted}`,
+      }));
+    }
+    void addFiles(files);
+  }
+
+  function onDrop(event: DragEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDragging(false);
+    void addFiles(Array.from(event.dataTransfer.files ?? []));
+  }
+
+  function removeAttachment(id: string) {
+    setPending((current) => ({
+      ...current,
+      [activeChatId]: (current[activeChatId] ?? []).filter((item) => item.id !== id),
+    }));
+  }
+
+  function onPickFiles(event: ChangeEvent<HTMLInputElement>) {
+    const list = event.target.files ? Array.from(event.target.files) : [];
+    event.target.value = "";
+    void addFiles(list);
+  }
+
   return (
     <div className="flex h-full flex-col border-l border-line bg-bg-1">
       <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
@@ -280,11 +364,55 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
           e.preventDefault();
           void send();
         }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
       >
-        <div className="rounded-xl border border-line bg-bg-2 focus-within:border-teal/40 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--teal)_14%,transparent)]">
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept={ACCEPT_FILES}
+          className="hidden"
+          onChange={onPickFiles}
+        />
+        <div
+          className={cn(
+            "rounded-xl border bg-bg-2 focus-within:border-teal/40 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--teal)_14%,transparent)]",
+            dragging ? "border-teal/60 bg-teal/5" : "border-line",
+          )}
+        >
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-2 pt-2">
+              {attachments.map((item) => (
+                <span
+                  key={item.id}
+                  className="flex max-w-full items-center gap-1 rounded-lg border border-line bg-bg px-1.5 py-1"
+                >
+                  {item.kind === "image" && item.dataUrl ? (
+                    // biome-ignore lint/performance/noImgElement: pasted/attached data URLs cannot use next/image
+                    <img src={item.dataUrl} alt={item.name} className="h-8 w-8 rounded object-cover" />
+                  ) : null}
+                  <span className="max-w-[140px] truncate font-mono text-[10px] text-muted">{item.name}</span>
+                  <button
+                    type="button"
+                    className="rounded p-0.5 text-muted hover:bg-hover hover:text-text"
+                    aria-label={`Remove ${item.name}`}
+                    onClick={() => removeAttachment(item.id)}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea
             value={draft}
             onChange={(e) => setDrafts((d) => ({ ...d, [activeChatId]: e.target.value }))}
+            onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -292,11 +420,22 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
               }
             }}
             rows={3}
-            placeholder="Ask Dovee to edit this project…"
+            placeholder={dragging ? "Drop files here…" : "Ask Dovee… paste or attach images and files"}
             className="w-full resize-none bg-transparent px-3 py-2 text-[13px] outline-none placeholder:text-muted/70"
           />
-          <div className="flex items-center justify-between px-2 pb-2">
-            <span className="font-mono text-[10px] text-muted">Enter send · Shift+Enter newline</span>
+          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <button
+                type="button"
+                title="Attach images or files"
+                onClick={() => fileRef.current?.click()}
+                className="inline-flex items-center gap-1 rounded-md border border-line bg-bg px-2 py-1 text-[11px] text-muted hover:border-teal/40 hover:bg-hover hover:text-text"
+              >
+                <Paperclip className="h-3.5 w-3.5" />
+                Attach
+              </button>
+              <span className="truncate font-mono text-[10px] text-muted">or paste / drop</span>
+            </div>
             {streaming ? (
               <button type="button" onClick={stop} className="rounded-md bg-rose/15 px-2 py-1 text-[11px] text-rose">
                 <Square className="mr-1 inline h-3 w-3" />
@@ -305,7 +444,7 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
             ) : (
               <button
                 type="submit"
-                disabled={!draft.trim()}
+                disabled={!draft.trim() && attachments.length === 0}
                 className="rounded-md bg-teal/20 px-2.5 py-1 text-[11px] text-teal hover:bg-teal/30 disabled:opacity-40"
               >
                 Send

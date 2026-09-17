@@ -15,6 +15,11 @@ const mono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Dovee — AI IDE",
   description: "A local coding IDE with a bring-your-own-model agent",
+  icons: {
+    icon: "/dovee-logo.svg",
+    shortcut: "/dovee-logo.svg",
+    apple: "/dovee-logo.svg",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

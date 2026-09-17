@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const { spawn } = require("child_process");
+const fs = require("fs");
 const http = require("http");
 const path = require("path");
 
@@ -9,6 +10,9 @@ const PORT = Number(process.env.DOVEE_PORT || 3100);
 const HOST = "127.0.0.1";
 const APP_URL = `http://${HOST}:${PORT}`;
 const ROOT = path.join(__dirname, "..");
+const LOGO_SVG = path.join(ROOT, "public", "dovee-logo.svg");
+const ICON_PNG = path.join(__dirname, "icon.png");
+const ICON_PATH = fs.existsSync(ICON_PNG) ? ICON_PNG : LOGO_SVG;
 
 let mainWindow = null;
 let nextProcess = null;
@@ -74,6 +78,14 @@ function stopNext() {
   child.kill("SIGTERM");
 }
 
+function logoMarkup() {
+  try {
+    return fs.readFileSync(LOGO_SVG, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 function loadHtml(win, body, color = "#9a97a3") {
   const html = `<!doctype html>
 <html>
@@ -83,9 +95,13 @@ function loadHtml(win, body, color = "#9a97a3") {
     <style>
       html, body { height: 100%; margin: 0; background: #09090b; color: ${color}; font-family: Segoe UI, system-ui, sans-serif; }
       body { display: flex; align-items: center; justify-content: center; -webkit-app-region: drag; }
+      .splash { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+      .splash svg { width: 96px; height: auto; display: block; }
     </style>
   </head>
-  <body>${body}</body>
+  <body>
+    <div class="splash">${logoMarkup()}<div>${body}</div></div>
+  </body>
 </html>`;
   return win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
 }
@@ -97,6 +113,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: "Dovee",
+    icon: ICON_PATH,
     backgroundColor: "#09090b",
     show: false,
     autoHideMenuBar: true,
@@ -168,6 +185,9 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     if (process.platform === "win32") {
       app.setAppUserModelId("com.dovee.ide");
+    }
+    if (process.platform === "darwin" && app.dock) {
+      app.dock.setIcon(ICON_PATH);
     }
 
     const win = createWindow();

@@ -1,4 +1,4 @@
-import { applyTheme, type ThemeId } from "@/lib/theme";
+import { applyEditorFontSize, applyTheme, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
 
 export async function saveTab(path: string) {
@@ -37,6 +37,7 @@ export async function persistAppearance(
   patch: Partial<{ theme: ThemeId; editorFontSize: number; wordWrap: boolean; minimap: boolean; autoSave: boolean }>,
 ) {
   if (patch.theme) applyTheme(patch.theme);
+  if (typeof patch.editorFontSize === "number") applyEditorFontSize(patch.editorFontSize);
   useIde.getState().patchAppearance(patch);
   await fetch("/api/settings", {
     method: "POST",

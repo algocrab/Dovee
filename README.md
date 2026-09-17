@@ -1,6 +1,8 @@
+
 # Dovee
 
-A local coding IDE with an autonomous agent powered by **DeepSeek V4.1** (`deepseek-flash`).
+A local coding IDE with an autonomous agent that works with **any compatible AI model provider** (for example: DeepSeek, OpenAI, etc.).
+By default, Dovee uses **DeepSeek V4.1** (`deepseek-flash`), but you can provide your own API key for any supported model (configure in Settings).
 
 File explorer, Monaco editor, terminal, and a tool-using agent that can read/write your repo and run commands — all on your machine. The API key never leaves the server.
 
@@ -10,13 +12,14 @@ File explorer, Monaco editor, terminal, and a tool-using agent that can read/wri
 npm install
 ```
 
+
 Create `.env.local`:
 
 ```env
 DEEPSEEK_API_KEY=sk-...
 ```
 
-Get a key at [platform.deepseek.com](https://platform.deepseek.com). You can also paste the key in **Settings** (saved to `~/.dovee/settings.json`).
+Use an API key from any supported AI model provider (DeepSeek, OpenAI, or others). For DeepSeek, get a key at [platform.deepseek.com](https://platform.deepseek.com). You can also paste any supported key in **Settings** (saved to `~/.dovee/settings.json`).
 
 ```bash
 npm run dev
@@ -62,3 +65,6 @@ The agent calls DeepSeek with thinking + function calling and loops until the ta
 Default model: **deepseek-flash** (DeepSeek-V4.1-Flash). Switch to `deepseek-v4-pro` in Settings if you want.
 
 Workspace is this folder until you change it in Settings.
+
+Default model: **deepseek-flash** (DeepSeek-V4.1-Flash).
+You can switch supported models in Settings by changing the API key and selecting the model/provider you want to use.

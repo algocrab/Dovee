@@ -1,10 +1,11 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ChangeEvent } from "react";
 import { getProvider, PROVIDERS, type ProviderId } from "@/lib/providers";
 import { applyTheme, THEMES, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
+import { persistAppearance } from "./actions";
 import { Switch } from "./chrome";
 import { refreshRoot } from "./file-tree";
 
@@ -33,6 +34,12 @@ function SettingsForm({
   const [autoSave, setAutoSave] = useState(settings?.autoSave ?? false);
 
   const preset = useMemo(() => getProvider(provider), [provider]);
+
+  const changeFontSize = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const size = Number(event.target.value);
+    setEditorFontSize(size);
+    void persistAppearance({ editorFontSize: size });
+  }, []);
 
   function switchProvider(id: ProviderId) {
     const next = getProvider(id);
@@ -112,9 +119,15 @@ function SettingsForm({
               min={11}
               max={22}
               value={editorFontSize}
-              onChange={(e) => setEditorFontSize(Number(e.target.value))}
+              onChange={changeFontSize}
               className="mt-1 w-full"
             />
+            <span
+              className="mt-2 block rounded-lg border border-line bg-bg px-3 py-2 font-mono text-text"
+              style={{ fontSize: editorFontSize, lineHeight: 1.55 }}
+            >
+              {'function greet() { return "hello"; }'}
+            </span>
           </label>
           <div className="grid gap-2">
             <Switch checked={wordWrap} onChange={setWordWrap} label="Word wrap" />

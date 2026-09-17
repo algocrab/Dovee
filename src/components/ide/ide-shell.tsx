@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useDesktopApp } from "@/lib/desktop";
-import { applyTheme, THEMES, type ThemeId } from "@/lib/theme";
+import { applyEditorFontSize, applyTheme, THEMES, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
 import { closeTabSafe, createNewFile, persistAppearance, refreshProblems, saveAll, saveTab } from "./actions";
 import { AgentPanel } from "./agent-panel";
@@ -46,6 +46,7 @@ export function IdeShell() {
       const s = await fetch("/api/settings").then((r) => r.json());
       useIde.getState().setSettings(s);
       applyTheme((s.theme as ThemeId) || "dark");
+      applyEditorFontSize(typeof s.editorFontSize === "number" ? s.editorFontSize : 15);
       if (!s.hasApiKey) useIde.getState().setSettingsOpen(true);
       await refreshRoot();
       const list = await fetch("/api/files/list").then((r) => r.json());

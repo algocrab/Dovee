@@ -19,12 +19,22 @@ export type ToolCard = {
   status: "running" | "done" | "error";
 };
 
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  mime: string;
+  kind: "image" | "text";
+  dataUrl?: string;
+  text?: string;
+};
+
 export type ChatMsg = {
   id: string;
   role: "user" | "assistant";
   content: string;
   thinking?: string;
   tools: ToolCard[];
+  attachments?: ChatAttachment[];
 };
 
 export type AgentChat = {
@@ -131,7 +141,7 @@ type IdeState = {
   setActiveChat: (id: string) => void;
   newChat: () => string;
   closeChat: (id: string) => void;
-  addUserMessage: (chatId: string, content: string) => string;
+  addUserMessage: (chatId: string, content: string, attachments?: ChatAttachment[]) => string;
   ensureAssistant: (chatId: string) => string;
   appendThinking: (chatId: string, text: string) => void;
   appendContent: (chatId: string, text: string) => void;
@@ -246,13 +256,14 @@ export const useIde = create<IdeState>((set, get) => ({
       const activeChatId = s.activeChatId === id ? chats[chats.length - 1].id : s.activeChatId;
       return { chats, activeChatId };
     }),
-  addUserMessage: (chatId, content) => {
+  addUserMessage: (chatId, content, attachments) => {
     const id = uid();
+    const titleSource = content.trim() || attachments?.[0]?.name || "New chat";
     set((s) => ({
       chats: patchChat(s.chats, chatId, (c) => ({
         ...c,
-        title: c.messages.length === 0 ? content.slice(0, 32) : c.title,
-        messages: [...c.messages, { id, role: "user", content, tools: [] }],
+        title: c.messages.length === 0 ? titleSource.slice(0, 32) : c.title,
+        messages: [...c.messages, { id, role: "user", content, tools: [], attachments }],
       })),
     }));
     return id;
