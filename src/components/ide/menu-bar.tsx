@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { closeAllTabs, closeTabSafe, createNewFile, openFolder, openNewWindow, persistAppearance, pickOpenFile, saveAll, saveTab } from "./actions";
+import { debugAction, startDebugging, stopDebugging, toggleBreakpointAt } from "./debug-actions";
 import { useDesktopApp } from "@/lib/desktop";
 import { useIde } from "@/stores/ide-store";
 
-const MENUS = ["File", "Edit", "View", "Go", "Terminal", "Help"] as const;
+const MENUS = ["File", "Edit", "View", "Go", "Run", "Terminal", "Help"] as const;
 
 export function MenuBar() {
   const [open, setOpen] = useState<string | null>(null);
@@ -105,6 +106,7 @@ function Menu({ name, onDone, isDesktop }: { name: string; onDone: () => void; i
         <Item label="Explorer" kbd="Ctrl+Shift+E" onClick={() => run(() => s.setLeftTab("explorer"))} />
         <Item label="Search" kbd="Ctrl+Shift+F" onClick={() => run(() => s.setLeftTab("search"))} />
         <Item label="Source Control" kbd="Ctrl+Shift+G" onClick={() => run(() => s.setLeftTab("git"))} />
+        <Item label="Run and Debug" kbd="Ctrl+Shift+D" onClick={() => run(() => s.setLeftTab("debug"))} />
         <Item label="Terminal" kbd="Ctrl+`" onClick={() => run(() => s.toggleTerminal())} />
         <Item label="Agent" kbd="Ctrl+L" onClick={() => run(() => s.toggleAgent())} />
         <Item label="Problems" onClick={() => run(() => s.setBottomTab("problems"))} />
@@ -123,6 +125,24 @@ function Menu({ name, onDone, isDesktop }: { name: string; onDone: () => void; i
       <div className="menu-panel absolute left-0 top-full z-40 mt-1">
         <Item label="Go to File" kbd="Ctrl+P" onClick={() => run(() => s.setCommandOpen(true, "files"))} />
         <Item label="Command Palette" kbd="Ctrl+Shift+P" onClick={() => run(() => s.setCommandOpen(true, "commands"))} />
+      </div>
+    );
+  }
+  if (name === "Run") {
+    return (
+      <div className="menu-panel absolute left-0 top-full z-40 mt-1">
+        <Item label="Start Debugging" kbd="F5" onClick={() => run(() => startDebugging())} />
+        <Item label="Stop Debugging" kbd="Shift+F5" onClick={() => run(() => stopDebugging())} />
+        <Item label="Continue" kbd="F5" onClick={() => run(() => debugAction("continue"))} />
+        <Item label="Step Over" kbd="F10" onClick={() => run(() => debugAction("stepOver"))} />
+        <Item label="Step Into" kbd="F11" onClick={() => run(() => debugAction("stepInto"))} />
+        <Item label="Step Out" kbd="Shift+F11" onClick={() => run(() => debugAction("stepOut"))} />
+        <hr className="my-1 border-line" />
+        <Item
+          label="Toggle Breakpoint"
+          kbd="F9"
+          onClick={() => run(() => s.activePath && toggleBreakpointAt(s.activePath, s.cursor.line))}
+        />
       </div>
     );
   }

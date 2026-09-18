@@ -66,7 +66,8 @@ function EditorGroupPane({ groupId }: { groupId: string }) {
   if (!group) return <EditorWelcome />;
 
   const focused = focusedGroupId === group.id;
-  const crumbs = group.activePath?.split("/") ?? [];
+  const activeTab = tabs.find((tab) => tab.path === group.activePath);
+  const crumbs = (activeTab?.sourcePath ?? group.activePath)?.replace(/\\/g, "/").split("/") ?? [];
   const groupTabs = group.paths
     .map((path) => tabs.find((t) => t.path === path))
     .filter((tab): tab is NonNullable<typeof tab> => Boolean(tab));

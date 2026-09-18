@@ -22,8 +22,6 @@ function parseHunks(diff: string): Hunk[] {
     const prefix = line[0];
     if (prefix === "+" || prefix === "-" || prefix === " ") {
       current.lines.push({ kind: prefix, text: line.slice(1) });
-    } else if (line === "\\ No newline at end of file") {
-      continue;
     }
   }
   return hunks;
@@ -89,6 +87,7 @@ export type FileDiff = {
 export type DiffPreviewLine = {
   kind: "context" | "add" | "del";
   text: string;
+  id?: string;
 };
 
 /** Cap each side so chats.json / SSE frames stay reasonable. */
@@ -170,10 +169,12 @@ export function previewDiff(original: string, modified: string, max = PREVIEW_MA
   hidden: number;
 } {
   const raw = linedDiff(splitLines(original), splitLines(modified));
-  if (raw.length <= max) return { lines: raw, hidden: 0 };
+  const tag = (lines: DiffPreviewLine[]) =>
+    lines.map((line, n) => ({ ...line, id: `${n}:${line.kind}:${line.text.slice(0, 48)}` }));
+  if (raw.length <= max) return { lines: tag(raw), hidden: 0 };
   const changed = raw.filter((line) => line.kind !== "context");
-  if (changed.length >= max) return { lines: changed.slice(0, max), hidden: raw.length - max };
+  if (changed.length >= max) return { lines: tag(changed.slice(0, max)), hidden: raw.length - max };
   const extra = max - changed.length;
   const context = raw.filter((line) => line.kind === "context").slice(0, extra);
-  return { lines: [...context, ...changed].slice(0, max), hidden: raw.length - max };
+  return { lines: tag([...context, ...changed].slice(0, max)), hidden: raw.length - max };
 }

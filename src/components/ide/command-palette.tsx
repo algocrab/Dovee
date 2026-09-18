@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { closeAllTabs, closeTabSafe, createNewFile, formatActive, openFolder, openNewWindow, persistAppearance, pickOpenFile, saveAll, saveTab } from "./actions";
+import { startDebugging, stopDebugging } from "./debug-actions";
 import { openFile } from "./file-tree";
 import { useIde } from "@/stores/ide-store";
 
@@ -36,6 +37,9 @@ function CommandPaletteInner() {
       { id: "explorer", label: "Show Explorer", run: () => g().setLeftTab("explorer") },
       { id: "search", label: "Show Search", run: () => g().setLeftTab("search") },
       { id: "git", label: "Show Source Control", run: () => g().setLeftTab("git") },
+      { id: "debug", label: "Show Run and Debug", run: () => g().setLeftTab("debug") },
+      { id: "start-debug", label: "Start Debugging", run: () => void startDebugging() },
+      { id: "stop-debug", label: "Stop Debugging", run: () => void stopDebugging() },
       { id: "term", label: "Toggle Terminal", run: () => g().toggleTerminal() },
       { id: "agent", label: "Toggle Agent", run: () => g().toggleAgent() },
       { id: "problems", label: "Show Problems", run: () => g().setBottomTab("problems") },

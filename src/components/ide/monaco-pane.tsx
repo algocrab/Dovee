@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
 import { formatTab } from "./actions";
+import { toggleBreakpointAt } from "./debug-actions";
 import { AddToChatButton, type ChatSpot } from "./add-to-chat";
 import { EditorWelcome } from "./chrome";
 
@@ -122,6 +123,7 @@ function appearanceOptions(fontSize: number, wordWrap: boolean, minimap: boolean
     lineHeight: Math.round(fontSize * 1.55),
     minimap: { enabled: minimap },
     wordWrap: (wordWrap ? "on" : "off") as "on" | "off",
+    glyphMargin: true,
   };
 }
 
@@ -202,11 +204,15 @@ export function MonacoPane({ groupId }: { groupId: string }) {
   const wordWrap = useIde((s) => s.settings?.wordWrap ?? true);
   const minimap = useIde((s) => s.settings?.minimap ?? false);
   const tab = tabs.find((t) => t.path === group?.activePath);
+  const breakpoints = useIde((s) => s.breakpoints);
+  const debugPaused = useIde((s) => s.debugPaused);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const appliedReveal = useRef<{ editor: unknown; nonce: number } | null>(null);
   const pathRef = useRef<string | null>(tab?.path ?? null);
+  const decoRef = useRef<string[]>([]);
   const [spot, setSpot] = useState<ChatSpot | null>(null);
+  const [editorGen, setEditorGen] = useState(0);
 
   // The editor's selection callbacks run outside React, so the path is kept in a ref.
   useEffect(() => {
@@ -267,9 +273,38 @@ export function MonacoPane({ groupId }: { groupId: string }) {
     applyReveal();
   }, [reveal, tab?.path, applyReveal]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco || !tab || tab.kind === "diff") return;
+    const next = [];
+    for (const bp of breakpoints) {
+      if (bp.path !== tab.path || !bp.enabled) continue;
+      next.push({
+        range: new monaco.Range(bp.line, 1, bp.line, 1),
+        options: {
+          glyphMarginClassName: "dovee-bp",
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      });
+    }
+    if (debugPaused && debugPaused.path === tab.path) {
+      next.push({
+        range: new monaco.Range(debugPaused.line, 1, debugPaused.line, 1),
+        options: {
+          isWholeLine: true,
+          className: "dovee-debug-line",
+          glyphMarginClassName: "dovee-debug-pos",
+        },
+      });
+    }
+    decoRef.current = editor.deltaDecorations(decoRef.current, next);
+  }, [breakpoints, debugPaused, tab, editorGen]);
+
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
+    setEditorGen((n) => n + 1);
     defineThemes(monaco);
     monaco.editor.setTheme(MONACO_THEME[theme]);
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
@@ -303,6 +338,18 @@ export function MonacoPane({ groupId }: { groupId: string }) {
           setStatus(result.changed ? `Formatted ${path}` : `${path} is already formatted`);
         });
       },
+    });
+
+    editor.onMouseDown((e) => {
+      const kinds = monaco.editor.MouseTargetType;
+      const inGutter =
+        e.target.type === kinds.GUTTER_GLYPH_MARGIN ||
+        e.target.type === kinds.GUTTER_LINE_NUMBERS ||
+        e.target.type === kinds.GUTTER_LINE_DECORATIONS;
+      if (!inGutter) return;
+      const line = e.target.position?.lineNumber ?? e.target.range?.startLineNumber;
+      const path = pathRef.current;
+      if (path && line) toggleBreakpointAt(path, line);
     });
 
     const showSelectionAction = () => {
@@ -374,9 +421,10 @@ export function MonacoPane({ groupId }: { groupId: string }) {
         options={{
           readOnly: true,
           renderSideBySide: true,
+          useInlineViewWhenSpaceIsLimited: false,
           originalEditable: false,
           fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-          ...appearanceOptions(fontSize, wordWrap, minimap),
+          ...appearanceOptions(fontSize, wordWrap, false),
           scrollBeyondLastLine: false,
           automaticLayout: true,
           padding: { top: 12 },

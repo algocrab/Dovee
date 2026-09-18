@@ -1,6 +1,6 @@
 "use client";
 
-import { Files, GitBranch, Search, Settings, SquareTerminal, SunMoon, WandSparkles } from "lucide-react";
+import { Bug, Files, GitBranch, Search, Settings, SquareTerminal, SunMoon, WandSparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useDesktopApp } from "@/lib/desktop";
@@ -12,12 +12,15 @@ import { AgentPanel } from "./agent-panel";
 import { BottomPanel } from "./bottom-panel";
 import { DoveeWordmark, IconButton, StatusSep } from "./chrome";
 import { CommandPalette } from "./command-palette";
+import { DebugPanel } from "./debug-panel";
+import { debugAction, startDebugging, stopDebugging, toggleBreakpointAt } from "./debug-actions";
 import { EditorWorkspace } from "./editor-group";
 import { FileTree, refreshRoot } from "./file-tree";
 import { GitPanel } from "./git-panel";
 import { MenuBar } from "./menu-bar";
 import { SearchPanel } from "./search-panel";
 import { SettingsModal } from "./settings-modal";
+import { useDebugSession } from "./use-debug-session";
 import { useFileWatcher } from "./use-file-watcher";
 
 export function IdeShell() {
@@ -39,6 +42,7 @@ export function IdeShell() {
   const chatsHydrated = useRef(false);
   useDesktopApp();
   useFileWatcher(Boolean(settings?.hasFolder !== false));
+  useDebugSession();
 
   useEffect(() => {
     void (async () => {
@@ -158,6 +162,35 @@ export function IdeShell() {
       if (meta && e.shiftKey && e.key.toLowerCase() === "e") {
         e.preventDefault();
         useIde.getState().setLeftTab("explorer");
+      }
+      if (meta && e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        useIde.getState().setLeftTab("debug");
+      }
+      if (e.key === "F5") {
+        e.preventDefault();
+        const status = useIde.getState().debugStatus;
+        if (e.shiftKey) void stopDebugging();
+        else if (status === "paused") void debugAction("continue");
+        else if (status === "running" || status === "starting") void debugAction("pause");
+        else void startDebugging();
+        return;
+      }
+      if (e.key === "F9") {
+        e.preventDefault();
+        const { activePath, cursor } = useIde.getState();
+        if (activePath) toggleBreakpointAt(activePath, cursor.line);
+        return;
+      }
+      if (e.key === "F10") {
+        e.preventDefault();
+        void debugAction("stepOver");
+        return;
+      }
+      if (e.key === "F11") {
+        e.preventDefault();
+        void debugAction(e.shiftKey ? "stepOut" : "stepInto");
+        return;
       }
       if (meta && e.key.toLowerCase() === "l") {
         e.preventDefault();
@@ -279,6 +312,9 @@ export function IdeShell() {
           <RailBtn active={leftTab === "git"} onClick={() => useIde.getState().setLeftTab("git")} title="Git">
             <GitBranch className="h-[18px] w-[18px]" />
           </RailBtn>
+          <RailBtn active={leftTab === "debug"} onClick={() => useIde.getState().setLeftTab("debug")} title="Run and Debug">
+            <Bug className="h-[18px] w-[18px]" />
+          </RailBtn>
           <div className="flex-1" />
           <RailBtn active={terminalOpen} onClick={() => useIde.getState().toggleTerminal()} title="Terminal">
             <SquareTerminal className="h-[18px] w-[18px]" />
@@ -289,7 +325,15 @@ export function IdeShell() {
         </nav>
 
         <aside style={{ width: sidebarWidth }} className="relative flex shrink-0 flex-col border-r border-line bg-bg-1">
-          {leftTab === "explorer" ? <FileTree /> : leftTab === "search" ? <SearchPanel /> : <GitPanel />}
+          {leftTab === "explorer" ? (
+            <FileTree />
+          ) : leftTab === "search" ? (
+            <SearchPanel />
+          ) : leftTab === "debug" ? (
+            <DebugPanel />
+          ) : (
+            <GitPanel />
+          )}
           <div
             className="resize-x -right-0.5"
             onMouseDown={(e) => {

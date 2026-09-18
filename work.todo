@@ -391,11 +391,61 @@ WARNING - PowerShell encoding trap
 
 STILL PENDING (Sprint 3+)
 [ ] #7 Command palette fuzzy matching
-[ ] #10 Agent changes visual diff
-[ ] #9 #11-#19 P2 power features (split editor, debugger, extensions, outline, file ops,
+[ ] #11-#19 remaining P2 power features (debugger, extensions, outline, file ops,
       multi-root, chat search/export, cost display, test runner, settings depth)
 [ ] API keys -> safeStorage / keychain
 [ ] Manual UI check: format-on-save toggle, Shift+Alt+F, Format Document command,
       search hit jump, live tree refresh
 [ ] Pre-existing gap noticed while here: the autoSave setting is persisted and shown in
       the settings UI, but nothing implements it (no idle/debounce writer anywhere).
+[ ] AgentPanel textarea hydration warning (uid()/Date.now in makeChat) — Next overlay
+      on "New chat"; does not block sending.
+
+=== STATUS UPDATE #7 - 2026-09-18 (Dovee agent) ===
+
+[x] #9 Split editor — already shipped last session (EditorWorkspace, max 2 groups,
+    Ctrl+\\ / Ctrl+1 / Ctrl+2, Close Group unsplits). Left in pending by accident.
+
+[x] #10 Agent changes visual diff
+    Capture original+modified at write_file / apply_diff time (not git HEAD), cap
+    80k/side. SSE tool_result carries `diff` for the UI only (not sent back to the
+    model). Tool cards: path + sibling Diff button, expand for colored hunks,
+    "Open side-by-side" opens an `agent-diff://` tab so it never collides with git
+    `diff://`. Monaco DiffEditor forced side-by-side even when the pane is narrow
+    (`useInlineViewWhenSpaceIsLimited: false`). Breadcrumb uses sourcePath.
+    Files: src/lib/diff.ts (packFileDiff, previewDiff), src/lib/tools.ts,
+    src/lib/agent.ts, src/types/chat.ts, src/stores/ide-store.ts,
+    src/components/ide/actions.ts, agent-panel.tsx, monaco-pane.tsx, editor-group.tsx
+    Verified live: write_file n=1 then n=2 → tool cards with red/green hunks +
+    side-by-side DiffEditor (original n=1 | modified n=2). tsc clean.
+
+Suggested next: #11 Debugger (breakpoints + DAP) — largest remaining P2 item.
+    Or #7 command palette fuzzy matching if you want a quick win first.
+
+=== STATUS UPDATE #8 - 2026-09-18 (Dovee agent) ===
+
+[x] #11 Debugger — breakpoints + Node inspector (CDP)
+    JS/TS files via `node --inspect-brk=0` (tsx for TS). Client-safe `canDebugPath`
+    in debug-path.ts so the renderer never imports node:child_process.
+    Breakpoints in Zustand (gutter / F9), session over `/api/debug` SSE.
+    Skip inspect-brk entry pause, then honor user BPs. Stack paths mapped from
+    Debugger.scriptParsed scriptId (Node omits callFrame.url). Locals include
+    closure scopes. F5 / Shift+F5 / F9 / F10 / F11, Run menu, Ctrl+Shift+D.
+    Files: src/types/debug.ts, src/lib/debug.ts, src/lib/debug-path.ts,
+    src/app/api/debug/route.ts, debug-panel.tsx, debug-actions.ts,
+    use-debug-session.ts, monaco-pane.tsx, ide-shell.tsx, menu-bar.tsx,
+    command-palette.tsx, file-tree.tsx, ide-store.ts, globals.css.
+    Verified live: gutter BP on bump() line 3 → Start Debugging → paused at
+    scratch-debug.js:3 with call stack + locals n=0 → Step Over to line 4 n=1
+    → Stop. tsc clean. Scratch file removed.
+
+STILL PENDING (Sprint 3+)
+[ ] #7 Command palette fuzzy matching
+[ ] #12-#19 remaining P2 (extensions, outline, file ops, multi-root, chat
+      search/export, cost display, test runner, settings depth)
+[ ] API keys -> safeStorage / keychain
+[ ] Manual UI check: format-on-save, search hit jump, live tree refresh
+[ ] autoSave setting is shown but not implemented
+[ ] AgentPanel textarea hydration warning (uid()/Date.now in makeChat)
+
+Suggested next: #12 Extensions/plugin API.

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ThemeId } from "@/lib/theme";
 import type { AgentChat, AgentFileDiff, ChatAttachment, ChatMsg, ChatUsage, ToolCard } from "@/types/chat";
+import type { Breakpoint, DebugFrame, DebugPaused, DebugSnapshot, DebugStatus, DebugVar } from "@/types/debug";
 
 export type TreeEntry = { name: string; path: string; type: "file" | "dir" };
 
@@ -16,6 +17,7 @@ export type Tab = {
 };
 
 export type { AgentChat, AgentFileDiff, ChatAttachment, ChatMsg, ChatUsage, ToolCard };
+export type { Breakpoint, DebugFrame, DebugPaused, DebugStatus, DebugVar };
 
 export type TermTab = {
   id: string;
@@ -146,7 +148,7 @@ type IdeState = {
   activePath: string | null;
   cursor: { line: number; column: number };
   reveal: RevealTarget | null;
-  leftTab: "explorer" | "search" | "git";
+  leftTab: "explorer" | "search" | "git" | "debug";
   agentOpen: boolean;
   terminalOpen: boolean;
   terminalHeight: number;
@@ -168,13 +170,20 @@ type IdeState = {
   composerFocusToken: number;
   gitBranch: string;
   status: string;
+  breakpoints: Breakpoint[];
+  debugStatus: DebugStatus;
+  debugFrames: DebugFrame[];
+  debugVars: DebugVar[];
+  debugOutput: string;
+  debugPaused: DebugPaused | null;
+  debugArgs: string;
   setSettings: (s: PublicSettings) => void;
   setTree: (e: TreeEntry[]) => void;
   setExpanded: (path: string, entries: TreeEntry[]) => void;
   setCursor: (line: number, column: number) => void;
   revealIn: (path: string, line: number, column?: number) => void;
   setSearch: (q: string, hits: SearchHit[]) => void;
-  setLeftTab: (t: "explorer" | "search" | "git") => void;
+  setLeftTab: (t: "explorer" | "search" | "git" | "debug") => void;
   toggleAgent: () => void;
   toggleTerminal: () => void;
   setTerminalHeight: (n: number) => void;
@@ -220,6 +229,16 @@ type IdeState = {
   addTerminal: () => string;
   setActiveTerm: (id: string) => void;
   closeTerminal: (id: string) => void;
+  toggleBreakpoint: (path: string, line: number) => void;
+  clearBreakpoints: (path?: string) => void;
+  remapBreakpoints: (from: string, to: string) => void;
+  setDebugArgs: (args: string) => void;
+  setDebugStatus: (status: DebugStatus) => void;
+  setDebugVars: (vars: DebugVar[]) => void;
+  appendDebugOutput: (text: string) => void;
+  clearDebugPaused: () => void;
+  applyDebugSnapshot: (snap: DebugSnapshot) => void;
+  resetDebugSession: () => void;
 };
 
 const firstChat = makeChat(1);
@@ -258,6 +277,13 @@ export const useIde = create<IdeState>((set, get) => ({
   activeTermId: firstTerm.id,
   gitBranch: "",
   status: "Ready",
+  breakpoints: [],
+  debugStatus: "idle",
+  debugFrames: [],
+  debugVars: [],
+  debugOutput: "",
+  debugPaused: null,
+  debugArgs: "",
   setSettings: (settings) => set({ settings }),
   setTree: (tree) => set({ tree }),
   setExpanded: (path, entries) =>
@@ -342,6 +368,7 @@ export const useIde = create<IdeState>((set, get) => ({
       editorGroups: [emptyGroup()],
       focusedGroupId: PRIMARY_GROUP_ID,
       activePath: null,
+      breakpoints: [],
     }),
   setActive: (path, groupId) =>
     set((s) => {
@@ -566,5 +593,45 @@ export const useIde = create<IdeState>((set, get) => ({
       const termTabs = s.termTabs.filter((t) => t.id !== id);
       const activeTermId = s.activeTermId === id ? termTabs[termTabs.length - 1].id : s.activeTermId;
       return { termTabs, activeTermId };
+    }),
+  toggleBreakpoint: (path, line) =>
+    set((s) => {
+      const existing = s.breakpoints.find((bp) => bp.path === path && bp.line === line);
+      if (existing) {
+        return { breakpoints: s.breakpoints.filter((bp) => bp.id !== existing.id) };
+      }
+      const breakpoint: Breakpoint = { id: `${path}:${line}`, path, line, enabled: true };
+      return { breakpoints: [...s.breakpoints, breakpoint] };
+    }),
+  clearBreakpoints: (path) =>
+    set((s) => ({
+      breakpoints: path ? s.breakpoints.filter((bp) => bp.path !== path) : [],
+    })),
+  remapBreakpoints: (from, to) =>
+    set((s) => ({
+      breakpoints: s.breakpoints.map((bp) =>
+        bp.path === from ? { ...bp, id: `${to}:${bp.line}`, path: to } : bp,
+      ),
+    })),
+  setDebugArgs: (debugArgs) => set({ debugArgs }),
+  setDebugStatus: (debugStatus) => set({ debugStatus }),
+  setDebugVars: (debugVars) => set({ debugVars }),
+  appendDebugOutput: (text) =>
+    set((s) => ({ debugOutput: (s.debugOutput + text).slice(-32_000) })),
+  clearDebugPaused: () => set({ debugPaused: null, debugFrames: [], debugVars: [] }),
+  applyDebugSnapshot: (snap) =>
+    set({
+      debugStatus: snap.status,
+      debugFrames: snap.frames,
+      debugVars: snap.vars,
+      debugOutput: snap.output,
+      debugPaused: snap.paused,
+    }),
+  resetDebugSession: () =>
+    set({
+      debugStatus: "idle",
+      debugFrames: [],
+      debugVars: [],
+      debugPaused: null,
     }),
 }));

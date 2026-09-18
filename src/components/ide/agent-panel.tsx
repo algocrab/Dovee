@@ -61,9 +61,9 @@ function ToolRow({ tool }: { tool: ToolCard }) {
       {open && hunks ? (
         <div className="border-t border-line">
           <pre className="max-h-56 overflow-auto px-0 py-1 font-mono text-[10px] leading-4">
-            {hunks.lines.map((line, i) => (
+            {hunks.lines.map((line) => (
               <div
-                key={`${line.kind}-${i}-${line.text.slice(0, 24)}`}
+                key={line.id ?? `${line.kind}:${line.text.slice(0, 48)}`}
                 className={cn(
                   "px-2.5 whitespace-pre-wrap",
                   line.kind === "add" && "bg-green/15 text-green",

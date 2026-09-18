@@ -86,6 +86,7 @@ function Node({
       useIde.getState().evictTab(entry.path);
       await openFile(next);
     }
+    useIde.getState().remapBreakpoints(entry.path, next);
     await refreshRoot();
   }
 
@@ -246,6 +247,7 @@ export function FileTree() {
       body: JSON.stringify({ path: entry.path }),
     });
     useIde.getState().evictTab(entry.path);
+    useIde.getState().clearBreakpoints(entry.path);
     setMenu(null);
     await refreshRoot();
   }

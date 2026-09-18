@@ -243,3 +243,26 @@ html.desktop.platform-win32 header,
 html.desktop.platform-linux header {
   padding-right: 140px;
 }
+
+.monaco-editor .glyph-margin .dovee-bp {
+  background: var(--rose);
+  border-radius: 50%;
+  margin: 4px 3px 0;
+  width: 8px !important;
+  height: 8px !important;
+}
+
+.monaco-editor .dovee-debug-line {
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+}
+
+.monaco-editor .glyph-margin .dovee-debug-pos {
+  width: 0 !important;
+  height: 0 !important;
+  margin: 5px 2px 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid var(--gold);
+  background: transparent;
+  border-radius: 0;
+}
