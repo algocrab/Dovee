@@ -10,6 +10,7 @@ import { getProvider } from "./providers";
 import { loadSettings } from "./settings";
 import { clampMaxToolRounds } from "./tool-rounds";
 import { buildSystemPrompt } from "./system-prompt";
+import type { FileDiff } from "./diff";
 import { executeTool, TOOL_SCHEMAS } from "./tools";
 
 export type AgentEvent =
@@ -23,6 +24,7 @@ export type AgentEvent =
       ok: boolean;
       output: string;
       changedFiles?: string[];
+      diff?: FileDiff;
     }
   | { type: "done"; usage?: TokenUsage }
   | { type: "error"; message: string };
@@ -178,6 +180,7 @@ export async function* runAgent(
         ok: result.ok,
         output,
         changedFiles: result.changedFiles,
+        diff: result.diff,
       };
       messages.push({
         role: "tool",

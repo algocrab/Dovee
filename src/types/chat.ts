@@ -8,6 +8,13 @@ export type ChatUsage = {
   estimated?: boolean;
 };
 
+export type AgentFileDiff = {
+  path: string;
+  original: string;
+  modified: string;
+  truncated?: boolean;
+};
+
 export type ToolCard = {
   id: string;
   name: string;
@@ -15,6 +22,8 @@ export type ToolCard = {
   output?: string;
   ok?: boolean;
   status: "running" | "done" | "error";
+  /** Both sides of a write_file / apply_diff, for the visual diff viewer. */
+  diff?: AgentFileDiff;
 };
 
 export type ChatAttachment = {

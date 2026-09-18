@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Paperclip, Plus, Square, WandSparkles, X } from "lucide-react";
+import { FileDiff, Loader2, Paperclip, Plus, Square, WandSparkles, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -15,37 +15,87 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/cn";
 import { ACCEPT_FILES, filesToAttachments, userApiContent } from "@/lib/chat-attachments";
+import { previewDiff } from "@/lib/diff";
 import { formatUsage } from "@/lib/llm";
 import { useIde, type ChatAttachment, type ChatMsg, type ChatUsage, type ToolCard } from "@/stores/ide-store";
+import { openDiffTab } from "./actions";
 import { openFile, refreshRoot } from "./file-tree";
 
 function ToolRow({ tool }: { tool: ToolCard }) {
   const [open, setOpen] = useState(false);
+  const fileDiff = tool.diff;
+  const hunks = fileDiff ? previewDiff(fileDiff.original, fileDiff.modified) : null;
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-bg/60">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px]"
-      >
-        <span
-          className={cn(
-            "h-1.5 w-1.5 rounded-full",
-            tool.status === "running" && "animate-pulse bg-gold",
-            tool.status === "done" && "bg-green",
-            tool.status === "error" && "bg-rose",
-          )}
-        />
-        <span className="text-gold">{tool.name}</span>
-        <span className="min-w-0 flex-1 truncate text-muted">
-          {tool.arguments.replace(/\s+/g, " ").slice(0, 80)}
-        </span>
-      </button>
-      {open && tool.output && (
+      <div className="flex items-center gap-1 pr-1">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px]"
+        >
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              tool.status === "running" && "animate-pulse bg-gold",
+              tool.status === "done" && "bg-green",
+              tool.status === "error" && "bg-rose",
+            )}
+          />
+          <span className="text-gold">{tool.name}</span>
+          <span className="min-w-0 flex-1 truncate text-muted">
+            {fileDiff?.path ?? tool.arguments.replace(/\s+/g, " ").slice(0, 80)}
+          </span>
+        </button>
+        {fileDiff ? (
+          <button
+            type="button"
+            title="Open side-by-side diff"
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] text-teal hover:bg-teal/10"
+            onClick={() => openDiffTab(fileDiff)}
+          >
+            <FileDiff className="h-3 w-3" />
+            diff
+          </button>
+        ) : null}
+      </div>
+      {open && hunks ? (
+        <div className="border-t border-line">
+          <pre className="max-h-56 overflow-auto px-0 py-1 font-mono text-[10px] leading-4">
+            {hunks.lines.map((line, i) => (
+              <div
+                key={`${line.kind}-${i}-${line.text.slice(0, 24)}`}
+                className={cn(
+                  "px-2.5 whitespace-pre-wrap",
+                  line.kind === "add" && "bg-green/15 text-green",
+                  line.kind === "del" && "bg-rose/15 text-rose",
+                  line.kind === "context" && "text-muted",
+                )}
+              >
+                {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
+                {line.text || " "}
+              </div>
+            ))}
+          </pre>
+          <p className="border-t border-line px-2.5 py-1 text-[10px] text-muted">
+            {hunks.hidden > 0 ? `${hunks.hidden} more lines. ` : ""}
+            {fileDiff?.truncated ? "Diff was truncated. " : ""}
+            <button
+              type="button"
+              className="text-teal hover:underline"
+              onClick={() => {
+                if (fileDiff) openDiffTab(fileDiff);
+              }}
+            >
+              Open side-by-side
+            </button>
+          </p>
+        </div>
+      ) : null}
+      {open && !hunks && tool.output ? (
         <pre className="max-h-48 overflow-auto border-t border-line px-2.5 py-2 font-mono text-[10px] text-muted whitespace-pre-wrap">
           {tool.output.slice(0, 4000)}
         </pre>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -55,7 +105,7 @@ function ToolSummary({ tools }: { tools: ToolCard[] }) {
   const running = tools.some((tool) => tool.status === "running");
   const errors = tools.filter((tool) => tool.status === "error").length;
   const reads = tools.filter((tool) => /read|list|search|tree/i.test(tool.name)).length;
-  const writes = tools.filter((tool) => /write|edit|rename|delete|mkdir/i.test(tool.name)).length;
+  const writes = tools.filter((tool) => /write|edit|diff|patch|rename|delete|mkdir/i.test(tool.name)).length;
   const parts = [
     reads ? `${reads} read` : "",
     writes ? `${writes} changed` : "",
@@ -321,7 +371,13 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
             });
           }
           if (ev === "tool_result") {
-            s.finishTool(chatId, String(data.id), Boolean(data.ok), String(data.output ?? ""));
+            s.finishTool(
+              chatId,
+              String(data.id),
+              Boolean(data.ok),
+              String(data.output ?? ""),
+              data.diff && typeof data.diff === "object" ? (data.diff as ToolCard["diff"]) : undefined,
+            );
             const changed = data.changedFiles as string[] | undefined;
             if (changed?.length) {
               await refreshRoot();

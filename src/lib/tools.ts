@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { applyUnifiedDiff } from "./diff";
+import { applyUnifiedDiff, packFileDiff, type FileDiff } from "./diff";
 import { isBinaryPath } from "./ignore";
 import { searchWorkspace } from "./search";
 import { getWorkspaceRoot, listDir, pathExists, resolveSafe, toPosix } from "./workspace";
@@ -22,6 +22,7 @@ export type ToolResult = {
   ok: boolean;
   output: string;
   changedFiles?: string[];
+  diff?: FileDiff;
 };
 
 /** Hard cap on characters returned from a single read_file call. */
@@ -246,9 +247,16 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
       case "write_file": {
         const rel = String(args.path ?? "");
         const abs = resolveSafe(root, rel);
+        const modified = String(args.content ?? "");
+        let original = "";
+        const existed = await pathExists(abs);
+        if (existed && !isBinaryPath(abs)) original = await fs.readFile(abs, "utf8");
         await fs.mkdir(path.dirname(abs), { recursive: true });
-        await fs.writeFile(abs, String(args.content ?? ""), "utf8");
-        return { ok: true, output: `Wrote ${rel}`, changedFiles: [toPosix(root, abs)] };
+        await fs.writeFile(abs, modified, "utf8");
+        const posix = toPosix(root, abs);
+        const diff =
+          !isBinaryPath(abs) && original !== modified ? packFileDiff(posix, original, modified) : undefined;
+        return { ok: true, output: `Wrote ${rel}`, changedFiles: [posix], diff };
       }
       case "apply_diff": {
         const rel = String(args.path ?? "");
@@ -257,7 +265,9 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
         const original = await fs.readFile(abs, "utf8");
         const next = applyUnifiedDiff(original, String(args.diff ?? ""));
         await fs.writeFile(abs, next, "utf8");
-        return { ok: true, output: `Patched ${rel}`, changedFiles: [toPosix(root, abs)] };
+        const posix = toPosix(root, abs);
+        const diff = original !== next ? packFileDiff(posix, original, next) : undefined;
+        return { ok: true, output: `Patched ${rel}`, changedFiles: [posix], diff };
       }
       case "run_terminal": {
         const command = String(args.command ?? "").trim();

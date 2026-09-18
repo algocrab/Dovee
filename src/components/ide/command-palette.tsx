@@ -31,6 +31,8 @@ function CommandPaletteInner() {
       { id: "save-all", label: "Save All", run: () => void saveAll() },
       { id: "close", label: "Close Editor", run: () => g().activePath && closeTabSafe(g().activePath!) },
       { id: "close-all", label: "Close All Editors", run: () => closeAllTabs() },
+      { id: "split", label: "Split Editor Right", run: () => g().splitEditor() },
+      { id: "join", label: "Join Editor Groups", run: () => g().joinEditors() },
       { id: "explorer", label: "Show Explorer", run: () => g().setLeftTab("explorer") },
       { id: "search", label: "Show Search", run: () => g().setLeftTab("search") },
       { id: "git", label: "Show Source Control", run: () => g().setLeftTab("git") },

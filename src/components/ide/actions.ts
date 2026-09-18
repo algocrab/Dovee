@@ -1,5 +1,19 @@
+import { languageFromPath } from "@/lib/ignore";
 import { applyEditorFontSize, applyTheme, type ThemeId } from "@/lib/theme";
 import { useIde, type PublicSettings } from "@/stores/ide-store";
+import type { AgentFileDiff } from "@/types/chat";
+
+export function openDiffTab(diff: AgentFileDiff, origin: "git" | "agent" = "agent") {
+  const virtual = origin === "git" ? `diff://${diff.path}` : `agent-diff://${diff.path}`;
+  useIde.getState().openTab({
+    path: virtual,
+    sourcePath: diff.path,
+    kind: "diff",
+    content: diff.modified,
+    original: diff.original,
+    language: languageFromPath(diff.path),
+  });
+}
 
 export async function saveTab(path: string) {
   const tab = useIde.getState().tabs.find((t) => t.path === path);
@@ -67,23 +81,44 @@ export async function formatActive() {
 }
 
 export async function saveAll() {
-  const dirty = useIde.getState().tabs.filter((t) => t.content !== t.original);
+  const dirty = useIde.getState().tabs.filter((t) => t.kind !== "diff" && t.content !== t.original);
   for (const tab of dirty) await saveTab(tab.path);
   if (dirty.length) useIde.getState().setStatus(`Saved ${dirty.length} file${dirty.length === 1 ? "" : "s"}`);
 }
 
-export function closeTabSafe(path: string) {
-  const tab = useIde.getState().tabs.find((t) => t.path === path);
-  if (tab && tab.content !== tab.original) {
+export function closeTabSafe(path: string, groupId?: string) {
+  const state = useIde.getState();
+  const gid = groupId ?? state.focusedGroupId;
+  const tab = state.tabs.find((t) => t.path === path);
+  const otherHas = state.editorGroups.some((g) => g.id !== gid && g.paths.includes(path));
+  if (tab && tab.kind !== "diff" && tab.content !== tab.original && !otherHas) {
     if (!confirm(`${path} has unsaved changes. Close anyway?`)) return;
   }
-  useIde.getState().closeTab(path);
+  state.closeTab(path, gid);
+}
+
+export function closeGroupSafe(groupId: string) {
+  const state = useIde.getState();
+  const group = state.editorGroups.find((g) => g.id === groupId);
+  if (!group) return;
+  const stillOpen = new Set(
+    state.editorGroups.filter((g) => g.id !== groupId).flatMap((g) => g.paths),
+  );
+  const uniqueDirty = group.paths.filter((p) => {
+    if (stillOpen.has(p)) return false;
+    const tab = state.tabs.find((t) => t.path === p);
+    return Boolean(tab && tab.kind !== "diff" && tab.content !== tab.original);
+  });
+  if (uniqueDirty.length && !confirm(`${uniqueDirty.length} unsaved file(s) in this group. Close anyway?`)) {
+    return;
+  }
+  state.closeGroup(groupId);
 }
 
 export function closeAllTabs() {
-  const dirty = useIde.getState().tabs.filter((t) => t.content !== t.original);
+  const dirty = useIde.getState().tabs.filter((t) => t.kind !== "diff" && t.content !== t.original);
   if (dirty.length && !confirm(`${dirty.length} unsaved file(s). Close all anyway?`)) return;
-  for (const tab of [...useIde.getState().tabs]) useIde.getState().closeTab(tab.path);
+  useIde.getState().resetEditors();
 }
 
 export async function persistAppearance(
@@ -192,7 +227,7 @@ export async function openFolder(folderPath?: string) {
   const current = useIde.getState().settings?.workspace ?? "";
   if (next.trim() === current && useIde.getState().settings?.hasFolder) return;
 
-  const dirty = useIde.getState().tabs.filter((t) => t.content !== t.original);
+  const dirty = useIde.getState().tabs.filter((t) => t.kind !== "diff" && t.content !== t.original);
   if (dirty.length && !confirm(`${dirty.length} unsaved file(s). Switch folder anyway?`)) return;
 
   const res = await fetch("/api/settings", {
@@ -206,7 +241,7 @@ export async function openFolder(folderPath?: string) {
     return;
   }
 
-  for (const tab of [...useIde.getState().tabs]) useIde.getState().closeTab(tab.path);
+  useIde.getState().resetEditors();
   useIde.setState({ expanded: {}, tree: [], searchHits: [], fileIndex: [] });
   useIde.getState().setSettings(data as PublicSettings);
   useIde.getState().setLeftTab("explorer");

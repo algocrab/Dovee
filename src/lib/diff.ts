@@ -77,3 +77,103 @@ export function applyUnifiedDiff(original: string, diff: string): string {
   const endedWithNewline = original.endsWith("\n") || original.endsWith("\r\n");
   return lines.join(newline) + (endedWithNewline ? newline : "");
 }
+
+/** Both sides of an agent (or git) file change, for a visual DiffEditor. */
+export type FileDiff = {
+  path: string;
+  original: string;
+  modified: string;
+  truncated?: boolean;
+};
+
+export type DiffPreviewLine = {
+  kind: "context" | "add" | "del";
+  text: string;
+};
+
+/** Cap each side so chats.json / SSE frames stay reasonable. */
+export const MAX_DIFF_SIDE = 80_000;
+const LCS_LIMIT = 500;
+const PREVIEW_MAX = 80;
+
+export function packFileDiff(path: string, original: string, modified: string): FileDiff {
+  const tooBig = original.length > MAX_DIFF_SIDE || modified.length > MAX_DIFF_SIDE;
+  return {
+    path,
+    original: tooBig ? original.slice(0, MAX_DIFF_SIDE) : original,
+    modified: tooBig ? modified.slice(0, MAX_DIFF_SIDE) : modified,
+    truncated: tooBig || undefined,
+  };
+}
+
+function splitLines(text: string): string[] {
+  if (!text) return [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+function lcsDiff(a: string[], b: string[]): DiffPreviewLine[] {
+  const n = a.length;
+  const m = b.length;
+  const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  const rev: DiffPreviewLine[] = [];
+  let i = n;
+  let j = m;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+      rev.push({ kind: "context", text: a[i - 1] });
+      i -= 1;
+      j -= 1;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      rev.push({ kind: "add", text: b[j - 1] });
+      j -= 1;
+    } else {
+      rev.push({ kind: "del", text: a[i - 1] });
+      i -= 1;
+    }
+  }
+  return rev.reverse();
+}
+
+function linedDiff(a: string[], b: string[]): DiffPreviewLine[] {
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start += 1;
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA -= 1;
+    endB -= 1;
+  }
+  const out: DiffPreviewLine[] = [];
+  for (const text of a.slice(Math.max(0, start - 2), start)) out.push({ kind: "context", text });
+  const midA = a.slice(start, endA);
+  const midB = b.slice(start, endB);
+  if (midA.length > LCS_LIMIT || midB.length > LCS_LIMIT || midA.length * midB.length > 80_000) {
+    for (const text of midA) out.push({ kind: "del", text });
+    for (const text of midB) out.push({ kind: "add", text });
+  } else {
+    out.push(...lcsDiff(midA, midB));
+  }
+  for (const text of a.slice(endA, Math.min(a.length, endA + 2))) out.push({ kind: "context", text });
+  return out;
+}
+
+/** Compact colored hunk list for the agent tool card. */
+export function previewDiff(original: string, modified: string, max = PREVIEW_MAX): {
+  lines: DiffPreviewLine[];
+  hidden: number;
+} {
+  const raw = linedDiff(splitLines(original), splitLines(modified));
+  if (raw.length <= max) return { lines: raw, hidden: 0 };
+  const changed = raw.filter((line) => line.kind !== "context");
+  if (changed.length >= max) return { lines: changed.slice(0, max), hidden: raw.length - max };
+  const extra = max - changed.length;
+  const context = raw.filter((line) => line.kind === "context").slice(0, extra);
+  return { lines: [...context, ...changed].slice(0, max), hidden: raw.length - max };
+}

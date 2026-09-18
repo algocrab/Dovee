@@ -5,7 +5,7 @@ import type { languages } from "monaco-editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
-import { formatActive } from "./actions";
+import { formatTab } from "./actions";
 import { AddToChatButton, type ChatSpot } from "./add-to-chat";
 import { EditorWelcome } from "./chrome";
 
@@ -191,9 +191,9 @@ function defineThemes(monaco: Parameters<OnMount>[1]) {
   });
 }
 
-export function MonacoPane() {
+export function MonacoPane({ groupId }: { groupId: string }) {
   const tabs = useIde((s) => s.tabs);
-  const activePath = useIde((s) => s.activePath);
+  const group = useIde((s) => s.editorGroups.find((g) => g.id === groupId));
   const updateContent = useIde((s) => s.updateContent);
   const setCursor = useIde((s) => s.setCursor);
   const reveal = useIde((s) => s.reveal);
@@ -201,7 +201,7 @@ export function MonacoPane() {
   const fontSize = useIde((s) => s.settings?.editorFontSize ?? 15);
   const wordWrap = useIde((s) => s.settings?.wordWrap ?? true);
   const minimap = useIde((s) => s.settings?.minimap ?? false);
-  const tab = tabs.find((t) => t.path === activePath);
+  const tab = tabs.find((t) => t.path === group?.activePath);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const appliedReveal = useRef<{ editor: unknown; nonce: number } | null>(null);
@@ -220,17 +220,17 @@ export function MonacoPane() {
    */
   const applyReveal = useCallback(() => {
     const editor = editorRef.current;
-    if (!editor) return;
-    const state = useIde.getState();
-    const request = state.reveal;
-    if (!request || request.path !== state.activePath) return;
+    const path = pathRef.current;
+    if (!editor || !path) return;
+    const request = useIde.getState().reveal;
+    if (!request || request.path !== path) return;
     const applied = appliedReveal.current;
     if (applied && applied.editor === editor && applied.nonce === request.nonce) return;
     appliedReveal.current = { editor, nonce: request.nonce };
     editor.revealLineInCenter(request.line);
     editor.setPosition({ lineNumber: request.line, column: Math.max(1, request.column || 1) });
-    editor.focus();
-  }, []);
+    if (useIde.getState().focusedGroupId === groupId) editor.focus();
+  }, [groupId]);
 
   // Whenever the active buffer changes (tab switch or edit), pull types for any
   // new bare imports it references. Already-loaded packages are a no-op.
@@ -254,6 +254,13 @@ export function MonacoPane() {
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
   }, [fontSize, wordWrap, minimap]);
 
+  const groupCount = useIde((s) => s.editorGroups.length);
+  const splitRatio = useIde((s) => s.splitRatio);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => editorRef.current?.layout());
+    return () => window.cancelAnimationFrame(frame);
+  }, [groupCount, splitRatio]);
+
   // Jump when Search / Problems / go-to raises a reveal request for this file.
   // Tracked per editor instance so a remount (tab switch) still lands the jump.
   useEffect(() => {
@@ -271,7 +278,12 @@ export function MonacoPane() {
       if (model) schedulePackageScan(monaco, model.getValue());
     });
     applyReveal();
-    applyReveal();
+
+    editor.onDidFocusEditorText(() => {
+      useIde.getState().focusGroup(groupId);
+      const pos = editor.getPosition();
+      if (pos) setCursor(pos.lineNumber, pos.column);
+    });
 
     // Monaco's own Format Document has no provider registered, so route Shift+Alt+F
     // through the same server-side prettier that backs format-on-save.
@@ -280,7 +292,16 @@ export function MonacoPane() {
       label: "Format Document",
       keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
       run: () => {
-        void formatActive();
+        const path = pathRef.current;
+        if (!path) return;
+        void formatTab(path).then((result) => {
+          const { setStatus } = useIde.getState();
+          if (!result.ok) {
+            setStatus(result.error ?? "Could not format this file");
+            return;
+          }
+          setStatus(result.changed ? `Formatted ${path}` : `${path} is already formatted`);
+        });
       },
     });
 
@@ -326,7 +347,9 @@ export function MonacoPane() {
     editor.onDidChangeCursorSelection(showSelectionAction);
     editor.onDidScrollChange(() => setSpot(null));
     editor.onDidChangeCursorPosition((e) => {
-      setCursor(e.position.lineNumber, e.position.column);
+      if (useIde.getState().focusedGroupId === groupId) {
+        setCursor(e.position.lineNumber, e.position.column);
+      }
     });
     editor.onDidDispose(() => {
       if (editorRef.current === editor) editorRef.current = null;
@@ -366,12 +389,12 @@ export function MonacoPane() {
   return (
     <>
       <Editor
-        key={tab.path}
         height="100%"
         theme={MONACO_THEME[theme]}
         language={tab.language}
         path={`file:///${tab.path}`}
         value={tab.content}
+        keepCurrentModel
         onChange={(value) => updateContent(tab.path, value ?? "")}
         onMount={onMount}
         options={{
@@ -388,7 +411,7 @@ export function MonacoPane() {
           formatOnPaste: true,
         }}
       />
-      {spot && <AddToChatButton spot={spot} onDone={() => setSpot(null)} />}
+      {spot ? <AddToChatButton spot={spot} onDone={() => setSpot(null)} /> : null}
     </>
   );
 }

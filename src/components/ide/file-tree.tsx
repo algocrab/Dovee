@@ -83,7 +83,7 @@ function Node({
     });
     const tab = useIde.getState().tabs.find((t) => t.path === entry.path);
     if (tab) {
-      useIde.getState().closeTab(entry.path);
+      useIde.getState().evictTab(entry.path);
       await openFile(next);
     }
     await refreshRoot();
@@ -245,7 +245,7 @@ export function FileTree() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: entry.path }),
     });
-    useIde.getState().closeTab(entry.path);
+    useIde.getState().evictTab(entry.path);
     setMenu(null);
     await refreshRoot();
   }

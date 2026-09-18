@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ThemeId } from "@/lib/theme";
-import type { AgentChat, ChatAttachment, ChatMsg, ChatUsage, ToolCard } from "@/types/chat";
+import type { AgentChat, AgentFileDiff, ChatAttachment, ChatMsg, ChatUsage, ToolCard } from "@/types/chat";
 
 export type TreeEntry = { name: string; path: string; type: "file" | "dir" };
 
@@ -9,13 +9,13 @@ export type Tab = {
   content: string;
   original: string;
   language: string;
-  /** "diff" tabs are read-only side-by-side views opened from the git panel. */
+  /** "diff" tabs are read-only side-by-side views opened from git or the agent. */
   kind?: "file" | "diff";
   /** Real workspace path when `path` is a virtual diff URI like `diff:src/foo.ts`. */
   sourcePath?: string;
 };
 
-export type { AgentChat, ChatAttachment, ChatMsg, ChatUsage, ToolCard };
+export type { AgentChat, AgentFileDiff, ChatAttachment, ChatMsg, ChatUsage, ToolCard };
 
 export type TermTab = {
   id: string;
@@ -58,6 +58,63 @@ export type RevealTarget = {
   nonce: number;
 };
 
+/** One editor column (tab strip + pane). Two groups = side-by-side split. */
+export type EditorGroup = {
+  id: string;
+  paths: string[];
+  activePath: string | null;
+};
+
+export const PRIMARY_GROUP_ID = "group-1";
+export const MAX_EDITOR_GROUPS = 2;
+
+function emptyGroup(id = PRIMARY_GROUP_ID): EditorGroup {
+  return { id, paths: [], activePath: null };
+}
+
+function activateInGroup(group: EditorGroup, path: string): EditorGroup {
+  if (group.paths.includes(path)) return { ...group, activePath: path };
+  return { ...group, paths: [...group.paths, path], activePath: path };
+}
+
+function dropFromGroup(group: EditorGroup, path: string): EditorGroup {
+  const paths = group.paths.filter((p) => p !== path);
+  if (paths.length === group.paths.length) return group;
+  const activePath = group.activePath === path ? (paths[paths.length - 1] ?? null) : group.activePath;
+  return { ...group, paths, activePath };
+}
+
+function focusedActive(groups: EditorGroup[], focusedGroupId: string): string | null {
+  return groups.find((g) => g.id === focusedGroupId)?.activePath ?? groups[0]?.activePath ?? null;
+}
+
+function ensureGroups(groups: EditorGroup[] | undefined, focusedGroupId: string | undefined) {
+  const editorGroups = groups?.length ? groups : [emptyGroup()];
+  const nextFocus = editorGroups.some((g) => g.id === focusedGroupId)
+    ? (focusedGroupId as string)
+    : editorGroups[0].id;
+  return { editorGroups, focusedGroupId: nextFocus };
+}
+
+function pruneGroups(
+  groups: EditorGroup[],
+  focusedGroupId: string,
+): { editorGroups: EditorGroup[]; focusedGroupId: string } {
+  if (groups.length <= 1) {
+    const editorGroups = groups.length ? groups : [emptyGroup()];
+    return { editorGroups, focusedGroupId: editorGroups[0].id };
+  }
+  const editorGroups = groups.filter((g) => g.paths.length > 0);
+  if (editorGroups.length === 0) {
+    const group = emptyGroup();
+    return { editorGroups: [group], focusedGroupId: group.id };
+  }
+  const nextFocus = editorGroups.some((g) => g.id === focusedGroupId)
+    ? focusedGroupId
+    : editorGroups[editorGroups.length - 1].id;
+  return { editorGroups, focusedGroupId: nextFocus };
+}
+
 export type SearchHit = {
   path: string;
   line: number;
@@ -83,6 +140,9 @@ type IdeState = {
   tree: TreeEntry[];
   expanded: Record<string, TreeEntry[]>;
   tabs: Tab[];
+  editorGroups: EditorGroup[];
+  focusedGroupId: string;
+  splitRatio: number;
   activePath: string | null;
   cursor: { line: number; column: number };
   reveal: RevealTarget | null;
@@ -130,8 +190,15 @@ type IdeState = {
   setFileIndex: (files: string[]) => void;
   setGitBranch: (branch: string) => void;
   openTab: (tab: Tab) => void;
-  closeTab: (path: string) => void;
-  setActive: (path: string) => void;
+  closeTab: (path: string, groupId?: string) => void;
+  evictTab: (path: string) => void;
+  resetEditors: () => void;
+  setActive: (path: string, groupId?: string) => void;
+  focusGroup: (id: string) => void;
+  splitEditor: () => void;
+  closeGroup: (id: string) => void;
+  joinEditors: () => void;
+  setSplitRatio: (n: number) => void;
   updateContent: (path: string, content: string) => void;
   markSaved: (path: string) => void;
   reloadTab: (path: string, content: string) => void;
@@ -146,7 +213,7 @@ type IdeState = {
   appendThinking: (chatId: string, text: string) => void;
   appendContent: (chatId: string, text: string) => void;
   startTool: (chatId: string, card: ToolCard) => void;
-  finishTool: (chatId: string, id: string, ok: boolean, output: string) => void;
+  finishTool: (chatId: string, id: string, ok: boolean, output: string, diff?: AgentFileDiff) => void;
   setMessageUsage: (chatId: string, usage: ChatUsage) => void;
   setChatStreaming: (chatId: string, v: boolean) => void;
   setStatus: (s: string) => void;
@@ -163,6 +230,9 @@ export const useIde = create<IdeState>((set, get) => ({
   tree: [],
   expanded: {},
   tabs: [],
+  editorGroups: [emptyGroup()],
+  focusedGroupId: PRIMARY_GROUP_ID,
+  splitRatio: 0.5,
   activePath: null,
   cursor: { line: 1, column: 1 },
   reveal: null,
@@ -194,7 +264,21 @@ export const useIde = create<IdeState>((set, get) => ({
     set((s) => ({ expanded: { ...s.expanded, [path]: entries } })),
   setCursor: (line, column) => set({ cursor: { line, column } }),
   revealIn: (path, line, column = 1) =>
-    set((s) => ({ reveal: { path, line, column, nonce: (s.reveal?.nonce ?? 0) + 1 } })),
+    set((s) => {
+      const owning =
+        s.editorGroups.find((g) => g.id === s.focusedGroupId && g.paths.includes(path)) ??
+        s.editorGroups.find((g) => g.paths.includes(path));
+      const focusedGroupId = owning?.id ?? s.focusedGroupId;
+      const editorGroups = s.editorGroups.map((g) =>
+        g.id === focusedGroupId && g.paths.includes(path) ? { ...g, activePath: path } : g,
+      );
+      return {
+        reveal: { path, line, column, nonce: (s.reveal?.nonce ?? 0) + 1 },
+        editorGroups,
+        focusedGroupId,
+        activePath: focusedActive(editorGroups, focusedGroupId),
+      };
+    }),
   setLeftTab: (leftTab) => set({ leftTab }),
   toggleAgent: () => set((s) => ({ agentOpen: !s.agentOpen })),
   toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
@@ -215,19 +299,112 @@ export const useIde = create<IdeState>((set, get) => ({
   openTab: (tab) =>
     set((s) => {
       const exists = s.tabs.some((t) => t.path === tab.path);
+      const { editorGroups: groups, focusedGroupId } = ensureGroups(s.editorGroups, s.focusedGroupId);
+      const editorGroups = groups.map((g) =>
+        g.id === focusedGroupId ? activateInGroup(g, tab.path) : g,
+      );
       return {
         tabs: exists ? s.tabs : [...s.tabs, tab],
+        editorGroups,
+        focusedGroupId,
         activePath: tab.path,
       };
     }),
-  closeTab: (path) =>
+  closeTab: (path, groupId) =>
     set((s) => {
-      const tabs = s.tabs.filter((t) => t.path !== path);
-      const activePath =
-        s.activePath === path ? (tabs[tabs.length - 1]?.path ?? null) : s.activePath;
-      return { tabs, activePath };
+      const gid = groupId ?? s.focusedGroupId;
+      const nextGroups = s.editorGroups.map((g) => (g.id === gid ? dropFromGroup(g, path) : g));
+      const pruned = pruneGroups(nextGroups, s.focusedGroupId === gid ? gid : s.focusedGroupId);
+      const stillOpen = pruned.editorGroups.some((g) => g.paths.includes(path));
+      return {
+        tabs: stillOpen ? s.tabs : s.tabs.filter((t) => t.path !== path),
+        editorGroups: pruned.editorGroups,
+        focusedGroupId: pruned.focusedGroupId,
+        activePath: focusedActive(pruned.editorGroups, pruned.focusedGroupId),
+      };
     }),
-  setActive: (activePath) => set({ activePath }),
+  evictTab: (path) =>
+    set((s) => {
+      const pruned = pruneGroups(
+        s.editorGroups.map((g) => dropFromGroup(g, path)),
+        s.focusedGroupId,
+      );
+      return {
+        tabs: s.tabs.filter((t) => t.path !== path),
+        editorGroups: pruned.editorGroups,
+        focusedGroupId: pruned.focusedGroupId,
+        activePath: focusedActive(pruned.editorGroups, pruned.focusedGroupId),
+      };
+    }),
+  resetEditors: () =>
+    set({
+      tabs: [],
+      editorGroups: [emptyGroup()],
+      focusedGroupId: PRIMARY_GROUP_ID,
+      activePath: null,
+    }),
+  setActive: (path, groupId) =>
+    set((s) => {
+      const gid = groupId ?? s.focusedGroupId;
+      const editorGroups = s.editorGroups.map((g) =>
+        g.id === gid ? { ...g, activePath: path } : g,
+      );
+      return { editorGroups, focusedGroupId: gid, activePath: path };
+    }),
+  focusGroup: (id) =>
+    set((s) => {
+      const group = s.editorGroups.find((g) => g.id === id);
+      if (!group) return s;
+      return { focusedGroupId: id, activePath: group.activePath };
+    }),
+  splitEditor: () =>
+    set((s) => {
+      const path = s.activePath;
+      if (!path) return { status: "Open a file to split the editor" };
+      if (s.editorGroups.length >= MAX_EDITOR_GROUPS) {
+        const other = s.editorGroups.find((g) => g.id !== s.focusedGroupId);
+        if (!other) return s;
+        const editorGroups = s.editorGroups.map((g) =>
+          g.id === other.id ? activateInGroup(g, path) : g,
+        );
+        return { editorGroups, focusedGroupId: other.id, activePath: path };
+      }
+      const newGroup: EditorGroup = { id: uid(), paths: [path], activePath: path };
+      return { editorGroups: [...s.editorGroups, newGroup] };
+    }),
+  closeGroup: (id) =>
+    set((s) => {
+      if (s.editorGroups.length <= 1) return s;
+      const remaining = s.editorGroups.filter((g) => g.id !== id);
+      if (!remaining.length) return s;
+      const stillOpen = new Set(remaining.flatMap((g) => g.paths));
+      const focusedGroupId = s.focusedGroupId === id ? remaining[0].id : s.focusedGroupId;
+      return {
+        tabs: s.tabs.filter((t) => stillOpen.has(t.path)),
+        editorGroups: remaining,
+        focusedGroupId,
+        activePath: focusedActive(remaining, focusedGroupId),
+      };
+    }),
+  joinEditors: () =>
+    set((s) => {
+      if (s.editorGroups.length < 2) return s;
+      const focused = s.editorGroups.find((g) => g.id === s.focusedGroupId) ?? s.editorGroups[0];
+      const paths = [...focused.paths];
+      for (const group of s.editorGroups) {
+        if (group.id === focused.id) continue;
+        for (const path of group.paths) {
+          if (!paths.includes(path)) paths.push(path);
+        }
+      }
+      const group: EditorGroup = { ...focused, paths, activePath: focused.activePath };
+      return {
+        editorGroups: [group],
+        focusedGroupId: group.id,
+        activePath: group.activePath,
+      };
+    }),
+  setSplitRatio: (n) => set({ splitRatio: Math.max(0.22, Math.min(0.78, n)) }),
   updateContent: (path, content) =>
     set((s) => ({
       tabs: s.tabs.map((t) => (t.path === path ? { ...t, content } : t)),
@@ -339,7 +516,7 @@ export const useIde = create<IdeState>((set, get) => ({
         return { ...c, messages };
       }),
     })),
-  finishTool: (chatId, id, ok, output) =>
+  finishTool: (chatId, id, ok, output, diff) =>
     set((s) => ({
       chats: patchChat(s.chats, chatId, (c) => {
         const messages = [...c.messages];
@@ -348,7 +525,7 @@ export const useIde = create<IdeState>((set, get) => ({
           messages[messages.length - 1] = {
             ...last,
             tools: last.tools.map((t) =>
-              t.id === id ? { ...t, ok, output, status: ok ? "done" : "error" } : t,
+              t.id === id ? { ...t, ok, output, status: ok ? "done" : "error", diff } : t,
             ),
           };
         }

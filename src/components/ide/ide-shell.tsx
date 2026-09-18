@@ -1,7 +1,6 @@
 "use client";
 
-import { Files, GitBranch, Search, Settings, SquareTerminal, SunMoon, WandSparkles, X } from "lucide-react";
-import dynamic from "next/dynamic";
+import { Files, GitBranch, Search, Settings, SquareTerminal, SunMoon, WandSparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useDesktopApp } from "@/lib/desktop";
@@ -11,20 +10,15 @@ import { closeTabSafe, createNewFile, openFolder, openNewWindow, persistAppearan
 import { SelectionActions } from "./add-to-chat";
 import { AgentPanel } from "./agent-panel";
 import { BottomPanel } from "./bottom-panel";
-import { DoveeWordmark, EditorWelcome, IconButton, StatusSep } from "./chrome";
+import { DoveeWordmark, IconButton, StatusSep } from "./chrome";
 import { CommandPalette } from "./command-palette";
-import { FileGlyph } from "./file-icon";
+import { EditorWorkspace } from "./editor-group";
 import { FileTree, refreshRoot } from "./file-tree";
 import { GitPanel } from "./git-panel";
 import { MenuBar } from "./menu-bar";
 import { SearchPanel } from "./search-panel";
 import { SettingsModal } from "./settings-modal";
 import { useFileWatcher } from "./use-file-watcher";
-
-const MonacoPane = dynamic(() => import("./monaco-pane").then((m) => m.MonacoPane), {
-  ssr: false,
-  loading: () => <EditorWelcome />,
-});
 
 export function IdeShell() {
   const leftTab = useIde((s) => s.leftTab);
@@ -186,6 +180,27 @@ export function IdeShell() {
         const path = useIde.getState().activePath;
         if (path) closeTabSafe(path);
       }
+      if (meta && !e.shiftKey && (e.key === "\\" || e.code === "Backslash")) {
+        e.preventDefault();
+        useIde.getState().splitEditor();
+        return;
+      }
+      if (meta && !e.shiftKey && e.key === "1") {
+        const id = useIde.getState().editorGroups[0]?.id;
+        if (id) {
+          e.preventDefault();
+          useIde.getState().focusGroup(id);
+        }
+        return;
+      }
+      if (meta && !e.shiftKey && e.key === "2") {
+        const id = useIde.getState().editorGroups[1]?.id;
+        if (id) {
+          e.preventDefault();
+          useIde.getState().focusGroup(id);
+        }
+        return;
+      }
       if (meta && (e.key === "=" || e.key === "+")) {
         e.preventDefault();
         const size = useIde.getState().settings?.editorFontSize ?? 15;
@@ -224,7 +239,6 @@ export function IdeShell() {
   }, []);
 
   const activeTab = tabs.find((t) => t.path === activePath);
-  const crumbs = activePath?.split("/") ?? [];
   const errCount = problems.filter((p) => p.severity === "error").length;
   const theme = (settings?.theme ?? "dark") as ThemeId;
 
@@ -295,60 +309,7 @@ export function IdeShell() {
         </aside>
 
         <section className="flex min-w-0 flex-1 flex-col bg-[var(--editor-bg)]">
-          {tabs.length > 0 && (
-            <div className="flex h-9 items-center gap-0.5 overflow-x-auto border-b border-line bg-bg-1 px-1">
-              {tabs.map((tab) => {
-                const dirty = tab.kind !== "diff" && tab.content !== tab.original;
-                const active = tab.path === activePath;
-                const label = (tab.sourcePath ?? tab.path).split("/").pop() ?? tab.path;
-                return (
-                  <button
-                    key={tab.path}
-                    type="button"
-                    onClick={() => useIde.getState().setActive(tab.path)}
-                    className={cn(
-                      "group flex max-w-[200px] items-center gap-1.5 border-t-2 px-3 py-1.5 font-mono text-[13px]",
-                      active
-                        ? "border-teal bg-bg text-text"
-                        : "border-transparent text-muted hover:bg-hover hover:text-text",
-                    )}
-                  >
-                    <FileGlyph name={label} />
-                    <span className="truncate">
-                      {tab.kind === "diff" ? (
-                        <span className="text-muted">diff · </span>
-                      ) : null}
-                      {label}
-                    </span>
-                    {dirty && <span className="h-1.5 w-1.5 rounded-full bg-gold" />}
-                    <X
-                      className={cn(
-                        "h-3.5 w-3.5 shrink-0 rounded-sm hover:bg-hover",
-                        active ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70",
-                      )}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        closeTabSafe(tab.path);
-                      }}
-                    />
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {activePath && (
-            <div className="flex items-center gap-1 overflow-x-auto border-b border-line bg-bg-1/80 px-3 py-1 font-mono text-[12px] text-muted">
-              {crumbs.map((part, i) => (
-                <span key={`${part}-${i}`} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-muted/50">/</span>}
-                  <span className={i === crumbs.length - 1 ? "text-text" : ""}>{part}</span>
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="min-h-0 flex-1">
-            <MonacoPane />
-          </div>
+          <EditorWorkspace />
           {terminalOpen && (
             <div style={{ height: terminalHeight }} className="relative shrink-0">
               <div
@@ -442,7 +403,6 @@ export function IdeShell() {
         </span>
       </footer>
 
-      <SettingsModal />
       <SettingsModal />
       <CommandPalette />
       <SelectionActions />

@@ -313,11 +313,23 @@ IMPORTANT - restart the dev server
   RESTART `npm run dev` (or the Electron app) before testing Search/Git/watch in
   the UI. Verified against a fresh server on port 3101 - all four endpoints OK.
 
+=== STATUS UPDATE #6 - 2026-09-17 (Dovee agent) ===
+
+DONE
+[x] #9 Split editor (side-by-side)
+    - Store: editorGroups[], focusedGroupId, splitRatio, splitEditor/closeGroup/joinEditors
+    - src/components/ide/editor-group.tsx: per-group tab strip + breadcrumbs + MonacoPane
+    - Same file can be open in both panes; edits share the Monaco model
+    - Split via tab-bar button, View menu, command palette, Ctrl+\
+    - Ctrl+1 / Ctrl+2 focus groups; Close Group unsplits
+    - Opening a file lands in the focused group
+    - Verified in the browser: AGENTS.md | CLAUDE.md side-by-side, then Close Group
+
 STILL PENDING (Sprint 2 + 3)
-[ ] #8 Formatter + format-on-save  <-- next, and the last Sprint 2 item
+[ ] #8 Formatter + format-on-save  (implemented earlier; still listed for a visual check)
 [ ] #7 Command palette fuzzy matching
 [ ] #10 Agent changes visual diff
-[ ] #9 #11-#19 P2 power features
+[ ] #11-#19 remaining P2 power features
 [ ] API keys -> safeStorage / keychain
 [ ] Manual UI check: search hit jump, replace confirm, discard confirm, live tree refresh
 === STATUS UPDATE #6 - 2026-09-17 (Dovee agent, part 3) ===

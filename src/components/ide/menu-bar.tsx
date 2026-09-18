@@ -109,6 +109,9 @@ function Menu({ name, onDone, isDesktop }: { name: string; onDone: () => void; i
         <Item label="Agent" kbd="Ctrl+L" onClick={() => run(() => s.toggleAgent())} />
         <Item label="Problems" onClick={() => run(() => s.setBottomTab("problems"))} />
         <hr className="my-1 border-line" />
+        <Item label="Split Editor Right" kbd="Ctrl+\" onClick={() => run(() => s.splitEditor())} />
+        <Item label="Join Editor Groups" onClick={() => run(() => s.joinEditors())} />
+        <hr className="my-1 border-line" />
         <Item label="Theme: Dark" onClick={() => run(() => persistAppearance({ theme: "dark" }))} />
         <Item label="Theme: Light" onClick={() => run(() => persistAppearance({ theme: "light" }))} />
         <Item label="Theme: Dusk" onClick={() => run(() => persistAppearance({ theme: "dusk" }))} />
