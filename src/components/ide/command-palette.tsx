@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { closeAllTabs, closeTabSafe, createNewFile, formatActive, openFolder, openNewWindow, persistAppearance, pickOpenFile, saveAll, saveTab } from "./actions";
 import { startDebugging, stopDebugging } from "./debug-actions";
+import { runExtensionCommand } from "./extension-actions";
 import { openFile } from "./file-tree";
 import { useIde } from "@/stores/ide-store";
 
@@ -17,11 +18,21 @@ export function CommandPalette() {
 function CommandPaletteInner() {
   const files = useIde((s) => s.fileIndex);
   const mode = useIde((s) => s.commandMode);
+  const extensions = useIde((s) => s.extensions);
   const [q, setQ] = useState(mode === "commands" ? ">" : "");
   const [idx, setIdx] = useState(0);
 
   const commands: Command[] = useMemo(() => {
     const g = () => useIde.getState();
+    const extra = extensions
+      .filter((ext) => ext.enabled)
+      .flatMap((ext) =>
+        ext.commands.map((command) => ({
+          id: command.id,
+          label: command.title,
+          run: () => void runExtensionCommand(command.id),
+        })),
+      );
     return [
       { id: "file", label: "Go to File", run: () => g().setCommandOpen(true, "files") },
       { id: "open-file", label: "Open File", run: () => pickOpenFile() },
@@ -38,6 +49,7 @@ function CommandPaletteInner() {
       { id: "search", label: "Show Search", run: () => g().setLeftTab("search") },
       { id: "git", label: "Show Source Control", run: () => g().setLeftTab("git") },
       { id: "debug", label: "Show Run and Debug", run: () => g().setLeftTab("debug") },
+      { id: "extensions", label: "Show Extensions", run: () => g().setLeftTab("extensions") },
       { id: "start-debug", label: "Start Debugging", run: () => void startDebugging() },
       { id: "stop-debug", label: "Stop Debugging", run: () => void stopDebugging() },
       { id: "term", label: "Toggle Terminal", run: () => g().toggleTerminal() },
@@ -52,8 +64,9 @@ function CommandPaletteInner() {
       { id: "format", label: "Format Document", run: () => void formatActive() },
       { id: "zoom-in", label: "Increase Font Size", run: () => void persistAppearance({ editorFontSize: Math.min(22, (g().settings?.editorFontSize ?? 15) + 1) }) },
       { id: "zoom-out", label: "Decrease Font Size", run: () => void persistAppearance({ editorFontSize: Math.max(11, (g().settings?.editorFontSize ?? 15) - 1) }) },
+      ...extra,
     ];
-  }, []);
+  }, [extensions]);
 
   const isCmd = q.startsWith(">");
   const needle = (isCmd ? q.slice(1) : q).toLowerCase().trim();

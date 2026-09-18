@@ -131,7 +131,10 @@ export async function persistAppearance(
     formatOnSave: boolean;
   }>,
 ) {
-  if (patch.theme) applyTheme(patch.theme);
+  if (patch.theme) {
+    applyTheme(patch.theme);
+    useIde.getState().setExtensionTheme(null);
+  }
   if (typeof patch.editorFontSize === "number") applyEditorFontSize(patch.editorFontSize);
   useIde.getState().patchAppearance(patch);
   await fetch("/api/settings", {

@@ -25,6 +25,8 @@ export type DoveeSettings = {
   /** Run prettier over the buffer before it is written on save. */
   formatOnSave: boolean;
   maxToolRounds: number;
+  /** Extension ids that should not activate. */
+  disabledExtensions: string[];
 };
 
 const SETTINGS_DIR = path.join(os.homedir(), ".dovee");
@@ -110,6 +112,7 @@ const DEFAULTS: DoveeSettings = {
   // Opt-in: formatting rewrites the whole file, so it never happens unasked.
   formatOnSave: false,
   maxToolRounds: DEFAULT_MAX_TOOL_ROUNDS,
+  disabledExtensions: [],
 };
 
 function envKey(provider: string) {
@@ -171,6 +174,9 @@ export async function loadSettings(): Promise<DoveeSettings> {
     formatOnSave:
       typeof stored.formatOnSave === "boolean" ? stored.formatOnSave : DEFAULTS.formatOnSave,
     maxToolRounds: clampMaxToolRounds(stored.maxToolRounds),
+    disabledExtensions: Array.isArray(stored.disabledExtensions)
+      ? stored.disabledExtensions.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length < 80).slice(0, 100)
+      : [],
   };
 }
 

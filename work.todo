@@ -441,11 +441,44 @@ Suggested next: #11 Debugger (breakpoints + DAP) — largest remaining P2 item.
 
 STILL PENDING (Sprint 3+)
 [ ] #7 Command palette fuzzy matching
-[ ] #12-#19 remaining P2 (extensions, outline, file ops, multi-root, chat
+[ ] #13-#19 remaining P2 (outline, file ops, multi-root, chat
       search/export, cost display, test runner, settings depth)
 [ ] API keys -> safeStorage / keychain
 [ ] Manual UI check: format-on-save, search hit jump, live tree refresh
 [ ] autoSave setting is shown but not implemented
 [ ] AgentPanel textarea hydration warning (uid()/Date.now in makeChat)
 
-Suggested next: #12 Extensions/plugin API.
+Suggested next: #13 Outline / symbols / go-to-symbol.
+
+=== STATUS UPDATE #9 - 2026-09-18 (Dovee agent) ===
+
+[x] #12 Extensions / plugin API
+    Workspace packages live in `.dovee/extensions/<id>/` with `extension.json`
+    (+ optional CommonJS `main` that exports `activate(dovee)`). API:
+    `commands.registerCommand`, `window.showStatus`, `workspace.readFile`.
+    Built-in "Hello Dovee" plus scaffold for "Hello Workspace". Enable/disable
+    persisted in settings.disabledExtensions. Commands land in the palette.
+    Files: src/types/extension.ts, src/lib/extensions.ts, src/app/api/extensions,
+    extensions-panel.tsx, extension-actions.ts, use-extensions.ts, settings,
+    ide-store, ide-shell (Puzzle rail, Ctrl+Shift+X), menu-bar, command-palette.
+    Verified: GET lists both, Hello: Say Hello → status bar, Hello Workspace
+    activate() → "Hello Workspace · 10:01:49 am", disable greys out its command.
+    tsc clean. Main scripts are CJS only (Turbopack forbids dynamic import()).
+
+=== STATUS UPDATE #10 - 2026-09-18 (Dovee agent) ===
+
+[x] Demo extensions (native, not VSIX)
+    Four built-in packs show contribution points in the Extensions rail:
+    1. Hello Dovee - status-bar command
+    2. Midnight Teal - chrome CSS vars + Monaco ext-midnight theme
+    3. JS/TS Snippets - type log / fn / rfc / imr / cl in JS/TS
+    4. Todo Marker - Alt+T inserts // TODO: at the cursor
+    Manifest contributes themes/snippets/keybindings. Client applies theme
+    + snippets + insert; server still runs activate() for Hello Workspace.
+    Files: src/lib/builtin-extensions.ts, extension-keys.ts, extension-snippets.ts,
+    types/extension.ts, extensions.ts, use-extensions.ts, monaco-pane, ide-shell,
+    extensions-panel chips, extension-actions (themeId/insert skip POST).
+    Verified: panel lists all four; Theme: Midnight Teal paints navy chrome;
+    log expands to console.log(); Alt+T inserts TODO. tsc clean.
+
+Suggested next: #13 Outline / symbols / go-to-symbol.

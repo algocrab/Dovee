@@ -1,6 +1,6 @@
 "use client";
 
-import { Bug, Files, GitBranch, Search, Settings, SquareTerminal, SunMoon, WandSparkles } from "lucide-react";
+import { Bug, Files, GitBranch, Puzzle, Search, Settings, SquareTerminal, SunMoon, WandSparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useDesktopApp } from "@/lib/desktop";
@@ -15,13 +15,17 @@ import { CommandPalette } from "./command-palette";
 import { DebugPanel } from "./debug-panel";
 import { debugAction, startDebugging, stopDebugging, toggleBreakpointAt } from "./debug-actions";
 import { EditorWorkspace } from "./editor-group";
+import { ExtensionsPanel } from "./extensions-panel";
 import { FileTree, refreshRoot } from "./file-tree";
 import { GitPanel } from "./git-panel";
 import { MenuBar } from "./menu-bar";
 import { SearchPanel } from "./search-panel";
 import { SettingsModal } from "./settings-modal";
 import { useDebugSession } from "./use-debug-session";
+import { useExtensions } from "./use-extensions";
 import { useFileWatcher } from "./use-file-watcher";
+import { runExtensionCommand } from "./extension-actions";
+import { eventMatchesChord } from "@/lib/extension-keys";
 
 export function IdeShell() {
   const leftTab = useIde((s) => s.leftTab);
@@ -43,6 +47,7 @@ export function IdeShell() {
   useDesktopApp();
   useFileWatcher(Boolean(settings?.hasFolder !== false));
   useDebugSession();
+  useExtensions();
 
   useEffect(() => {
     void (async () => {
@@ -167,6 +172,10 @@ export function IdeShell() {
         e.preventDefault();
         useIde.getState().setLeftTab("debug");
       }
+      if (meta && e.shiftKey && e.key.toLowerCase() === "x") {
+        e.preventDefault();
+        useIde.getState().setLeftTab("extensions");
+      }
       if (e.key === "F5") {
         e.preventDefault();
         const status = useIde.getState().debugStatus;
@@ -191,6 +200,16 @@ export function IdeShell() {
         e.preventDefault();
         void debugAction(e.shiftKey ? "stepOut" : "stepInto");
         return;
+      }
+      const extState = useIde.getState();
+      for (const ext of extState.extensions) {
+        if (!ext.enabled) continue;
+        for (const bind of ext.keybindings) {
+          if (!eventMatchesChord(e, bind.key)) continue;
+          e.preventDefault();
+          void runExtensionCommand(bind.command);
+          return;
+        }
       }
       if (meta && e.key.toLowerCase() === "l") {
         e.preventDefault();
@@ -315,6 +334,9 @@ export function IdeShell() {
           <RailBtn active={leftTab === "debug"} onClick={() => useIde.getState().setLeftTab("debug")} title="Run and Debug">
             <Bug className="h-[18px] w-[18px]" />
           </RailBtn>
+          <RailBtn active={leftTab === "extensions"} onClick={() => useIde.getState().setLeftTab("extensions")} title="Extensions">
+            <Puzzle className="h-[18px] w-[18px]" />
+          </RailBtn>
           <div className="flex-1" />
           <RailBtn active={terminalOpen} onClick={() => useIde.getState().toggleTerminal()} title="Terminal">
             <SquareTerminal className="h-[18px] w-[18px]" />
@@ -331,6 +353,8 @@ export function IdeShell() {
             <SearchPanel />
           ) : leftTab === "debug" ? (
             <DebugPanel />
+          ) : leftTab === "extensions" ? (
+            <ExtensionsPanel />
           ) : (
             <GitPanel />
           )}

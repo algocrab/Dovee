@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ThemeId } from "@/lib/theme";
 import type { AgentChat, AgentFileDiff, ChatAttachment, ChatMsg, ChatUsage, ToolCard } from "@/types/chat";
 import type { Breakpoint, DebugFrame, DebugPaused, DebugSnapshot, DebugStatus, DebugVar } from "@/types/debug";
+import type { ExtensionInfo } from "@/types/extension";
 
 export type TreeEntry = { name: string; path: string; type: "file" | "dir" };
 
@@ -41,6 +42,8 @@ export type PublicSettings = {
   formatOnSave: boolean;
   maxToolRounds: number;
 };
+
+export type LeftTab = "explorer" | "search" | "git" | "debug" | "extensions";
 
 export type Problem = {
   path: string;
@@ -148,7 +151,7 @@ type IdeState = {
   activePath: string | null;
   cursor: { line: number; column: number };
   reveal: RevealTarget | null;
-  leftTab: "explorer" | "search" | "git" | "debug";
+  leftTab: LeftTab;
   agentOpen: boolean;
   terminalOpen: boolean;
   terminalHeight: number;
@@ -177,13 +180,16 @@ type IdeState = {
   debugOutput: string;
   debugPaused: DebugPaused | null;
   debugArgs: string;
+  extensions: ExtensionInfo[];
+  extensionThemeId: string | null;
+  pendingInsert: { text: string; nonce: number } | null;
   setSettings: (s: PublicSettings) => void;
   setTree: (e: TreeEntry[]) => void;
   setExpanded: (path: string, entries: TreeEntry[]) => void;
   setCursor: (line: number, column: number) => void;
   revealIn: (path: string, line: number, column?: number) => void;
   setSearch: (q: string, hits: SearchHit[]) => void;
-  setLeftTab: (t: "explorer" | "search" | "git" | "debug") => void;
+  setLeftTab: (t: LeftTab) => void;
   toggleAgent: () => void;
   toggleTerminal: () => void;
   setTerminalHeight: (n: number) => void;
@@ -239,6 +245,9 @@ type IdeState = {
   clearDebugPaused: () => void;
   applyDebugSnapshot: (snap: DebugSnapshot) => void;
   resetDebugSession: () => void;
+  setExtensions: (extensions: ExtensionInfo[]) => void;
+  setExtensionTheme: (id: string | null) => void;
+  requestInsert: (text: string) => void;
 };
 
 const firstChat = makeChat(1);
@@ -284,6 +293,9 @@ export const useIde = create<IdeState>((set, get) => ({
   debugOutput: "",
   debugPaused: null,
   debugArgs: "",
+  extensions: [],
+  extensionThemeId: null,
+  pendingInsert: null,
   setSettings: (settings) => set({ settings }),
   setTree: (tree) => set({ tree }),
   setExpanded: (path, entries) =>
@@ -634,4 +646,8 @@ export const useIde = create<IdeState>((set, get) => ({
       debugVars: [],
       debugPaused: null,
     }),
+  setExtensions: (extensions) => set({ extensions }),
+  setExtensionTheme: (extensionThemeId) => set({ extensionThemeId }),
+  requestInsert: (text) =>
+    set((s) => ({ pendingInsert: { text, nonce: (s.pendingInsert?.nonce ?? 0) + 1 } })),
 }));

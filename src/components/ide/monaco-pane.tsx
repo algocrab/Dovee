@@ -7,6 +7,7 @@ import { MONACO_THEME, type ThemeId } from "@/lib/theme";
 import { useIde } from "@/stores/ide-store";
 import { formatTab } from "./actions";
 import { toggleBreakpointAt } from "./debug-actions";
+import { applyExtensionEditorTheme, insertAtCursor, syncExtensionSnippets } from "./extension-snippets";
 import { AddToChatButton, type ChatSpot } from "./add-to-chat";
 import { EditorWelcome } from "./chrome";
 
@@ -206,6 +207,10 @@ export function MonacoPane({ groupId }: { groupId: string }) {
   const tab = tabs.find((t) => t.path === group?.activePath);
   const breakpoints = useIde((s) => s.breakpoints);
   const debugPaused = useIde((s) => s.debugPaused);
+  const extensions = useIde((s) => s.extensions);
+  const extensionThemeId = useIde((s) => s.extensionThemeId);
+  const pendingInsert = useIde((s) => s.pendingInsert);
+  const monacoThemeName = extensionThemeId ? `ext-${extensionThemeId}` : MONACO_THEME[theme];
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const appliedReveal = useRef<{ editor: unknown; nonce: number } | null>(null);
@@ -251,8 +256,18 @@ export function MonacoPane({ groupId }: { groupId: string }) {
   }, [tab]);
 
   useEffect(() => {
-    monacoRef.current?.editor.setTheme(MONACO_THEME[theme]);
-  }, [theme]);
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+    applyExtensionEditorTheme(monaco, extensions, extensionThemeId, MONACO_THEME[theme]);
+    syncExtensionSnippets(monaco, extensions);
+  }, [theme, extensions, extensionThemeId, editorGen]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !pendingInsert) return;
+    if (useIde.getState().focusedGroupId !== groupId) return;
+    insertAtCursor(editor, pendingInsert.text);
+  }, [pendingInsert, groupId]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -306,7 +321,8 @@ export function MonacoPane({ groupId }: { groupId: string }) {
     monacoRef.current = monaco;
     setEditorGen((n) => n + 1);
     defineThemes(monaco);
-    monaco.editor.setTheme(MONACO_THEME[theme]);
+    applyExtensionEditorTheme(monaco, useIde.getState().extensions, useIde.getState().extensionThemeId, MONACO_THEME[theme]);
+    syncExtensionSnippets(monaco, useIde.getState().extensions);
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
     void loadTypeLibs(monaco).then(() => {
       const model = editor.getModel();
@@ -414,7 +430,7 @@ export function MonacoPane({ groupId }: { groupId: string }) {
       <DiffEditor
         key={tab.path}
         height="100%"
-        theme={MONACO_THEME[theme]}
+        theme={monacoThemeName}
         language={tab.language}
         original={tab.original}
         modified={tab.content}
@@ -438,7 +454,7 @@ export function MonacoPane({ groupId }: { groupId: string }) {
     <>
       <Editor
         height="100%"
-        theme={MONACO_THEME[theme]}
+        theme={monacoThemeName}
         language={tab.language}
         path={`file:///${tab.path}`}
         value={tab.content}

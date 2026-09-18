@@ -107,6 +107,7 @@ function Menu({ name, onDone, isDesktop }: { name: string; onDone: () => void; i
         <Item label="Search" kbd="Ctrl+Shift+F" onClick={() => run(() => s.setLeftTab("search"))} />
         <Item label="Source Control" kbd="Ctrl+Shift+G" onClick={() => run(() => s.setLeftTab("git"))} />
         <Item label="Run and Debug" kbd="Ctrl+Shift+D" onClick={() => run(() => s.setLeftTab("debug"))} />
+        <Item label="Extensions" kbd="Ctrl+Shift+X" onClick={() => run(() => s.setLeftTab("extensions"))} />
         <Item label="Terminal" kbd="Ctrl+`" onClick={() => run(() => s.toggleTerminal())} />
         <Item label="Agent" kbd="Ctrl+L" onClick={() => run(() => s.toggleAgent())} />
         <Item label="Problems" onClick={() => run(() => s.setBottomTab("problems"))} />
