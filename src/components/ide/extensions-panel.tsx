@@ -28,7 +28,7 @@ export function ExtensionsPanel() {
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
         {extensions.length === 0 ? (
           <p className="px-2 py-3 text-[12px] text-muted">
-            No extensions loaded. Add a folder with <span className="font-mono">extension.json</span> under{" "}
+            No extensions loaded. Add an unpacked extension folder with <span className="font-mono">package.json</span> or{" "}
             <span className="font-mono">.dovee/extensions</span>.
           </p>
         ) : (
@@ -89,8 +89,9 @@ export function ExtensionsPanel() {
           ))
         )}
         <p className="px-2 pt-2 text-[11px] text-muted">
-          Workspace extensions live in <span className="font-mono">.dovee/extensions/&lt;id&gt;/</span> and may export{" "}
-          <span className="font-mono">activate(dovee)</span>. They run locally in the IDE process.
+          Dovee accepts an unpacked VS Code-style <span className="font-mono">package.json</span> or native{" "}
+          <span className="font-mono">extension.json</span> under <span className="font-mono">.dovee/extensions/&lt;id&gt;/</span>.
+          The supported subset includes commands, snippets, themes, keybindings, and limited local APIs. Extensions run locally in the IDE process.
         </p>
       </div>
     </div>

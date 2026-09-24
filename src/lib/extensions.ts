@@ -177,6 +177,15 @@ async function readManifestFile(file: string, fallbackId: string) {
   }
 }
 
+async function readCompatibleManifest(folder: string, fallbackId: string) {
+  const candidates = ["extension.json", "package.json"];
+  for (const name of candidates) {
+    const manifest = await readManifestFile(path.join(folder, name), fallbackId);
+    if (manifest) return manifest;
+  }
+  return null;
+}
+
 async function scanWorkspace(root: string): Promise<Array<ExtensionManifest & { folder: string }>> {
   const dir = path.join(root, ...EXT_DIR);
   let names: string[] = [];
@@ -195,7 +204,7 @@ async function scanWorkspace(root: string): Promise<Array<ExtensionManifest & { 
     } catch {
       continue;
     }
-    const manifest = await readManifestFile(path.join(folder, "extension.json"), name);
+    const manifest = await readCompatibleManifest(folder, name);
     if (!manifest || seen.has(manifest.id)) continue;
     seen.add(manifest.id);
     found.push({ ...manifest, folder });
@@ -210,11 +219,17 @@ async function loadModule(abs: string) {
   return req(resolved) as { activate?: (api: unknown) => unknown };
 }
 
-function bindApi(extensionId: string, root: string, allowed: Set<string>) {
+function bindApi(
+  extensionId: string,
+  root: string,
+  allowed: Set<string>,
+  permissions: Set<string>,
+) {
   const rt = runtime();
   return {
     commands: {
       registerCommand(id: string, run: Handler) {
+        if (!permissions.has("commands")) return;
         if (typeof id !== "string" || typeof run !== "function") return;
         if (!allowed.has(id) && !id.startsWith(`${extensionId}.`)) return;
         rt.handlers.set(id, { extensionId, run });
@@ -222,11 +237,13 @@ function bindApi(extensionId: string, root: string, allowed: Set<string>) {
     },
     window: {
       showStatus(message: unknown) {
+        if (!permissions.has("status")) return;
         rt.statusSink(String(message ?? "").slice(0, 240));
       },
     },
     workspace: {
       async readFile(relPath: string) {
+        if (!permissions.has("workspace.read")) throw new Error("Extension lacks workspace.read permission");
         const abs = resolveSafe(root, String(relPath ?? ""));
         return fs.readFile(abs, "utf8");
       },
@@ -278,7 +295,7 @@ async function activateOne(
       rt.activated.add(manifest.id);
       return;
     }
-    const api = bindApi(manifest.id, root, allowed);
+    const api = bindApi(manifest.id, root, allowed, new Set(manifest.permissions ?? ["commands", "status"]));
     await Promise.resolve(activate(api));
     rt.activated.add(manifest.id);
   } catch (error) {
