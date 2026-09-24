@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Check, FolderOpen, KeyRound, Palette, Search, ShieldCheck, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useCallback, useMemo, useState, type ChangeEvent } from "react";
 import { getProvider, PROVIDERS, type ProviderId } from "@/lib/providers";
 import { MAX_TOOL_ROUNDS_LIMIT, MIN_TOOL_ROUNDS } from "@/lib/tool-rounds";
@@ -43,6 +43,8 @@ function SettingsForm({
   );
   const [collaborationEnabled, setCollaborationEnabled] = useState(settings?.collaborationEnabled ?? false);
   const [maxToolRounds, setMaxToolRounds] = useState(settings?.maxToolRounds ?? 120);
+  const [activeSection, setActiveSection] = useState("General");
+  const [settingsSearch, setSettingsSearch] = useState("");
 
   const preset = useMemo(() => getProvider(provider), [provider]);
 
@@ -106,11 +108,68 @@ function SettingsForm({
     await refreshRoot();
   }
 
+  const navItems = [
+    { label: "General", icon: SlidersHorizontal },
+    { label: "Appearance", icon: Palette },
+    { label: "AI Provider", icon: Sparkles },
+    { label: "Inline Completion", icon: Check },
+    { label: "Workspace", icon: FolderOpen },
+    { label: "Privacy", icon: ShieldCheck },
+  ];
+  const visibleNav = navItems.filter((item) => item.label.toLowerCase().includes(settingsSearch.toLowerCase()));
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4">
-      <div className="max-h-[88vh] w-full max-w-lg overflow-auto rounded-2xl border border-line bg-bg-2 p-5 shadow-[var(--shadow)]">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-medium">Settings</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 sm:p-6">
+      <div className="flex h-[min(820px,94vh)] w-full max-w-6xl overflow-hidden rounded-2xl border border-line bg-bg-2 shadow-[var(--shadow)]">
+        <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-bg-1/80 p-3 md:flex">
+          <div className="mb-4 flex items-center gap-2 rounded-xl bg-bg-2 p-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal/15 text-teal">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-medium">Dovee</div>
+              <div className="truncate text-[11px] text-muted">AI coding workspace</div>
+            </div>
+          </div>
+          <label className="relative mb-4 block">
+            <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-muted" />
+            <input
+              value={settingsSearch}
+              onChange={(event) => setSettingsSearch(event.target.value)}
+              placeholder="Search settings"
+              className="w-full rounded-lg border border-line bg-bg px-8 py-1.5 text-[12px] text-text outline-none"
+            />
+          </label>
+          <div className="space-y-0.5">
+            {visibleNav.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => setActiveSection(item.label)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] ${
+                    activeSection === item.label ? "bg-hover text-text" : "text-muted hover:bg-hover hover:text-text"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-auto rounded-xl border border-teal/20 bg-teal/5 p-3 text-[11px] leading-relaxed text-muted">
+            <KeyRound className="mb-2 h-4 w-4 text-teal" />
+            Your API key is used only for provider requests and stays on this machine.
+          </div>
+        </aside>
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-7">
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <p className="eyebrow">Preferences</p>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight">{activeSection}</h2>
+            <p className="mt-1 text-[13px] text-muted">Configure Dovee for the way you build.</p>
+          </div>
           <button
             type="button"
             onClick={() => useIde.getState().setSettingsOpen(false)}
@@ -121,7 +180,8 @@ function SettingsForm({
           </button>
         </div>
 
-        <section className="mb-5">
+        <div className="mx-auto max-w-3xl space-y-6">
+        <section className="panel-surface p-4">
           <p className="mb-2 text-[13px] font-medium">Appearance</p>
           <div className="mb-3 grid grid-cols-3 gap-2">
             {THEMES.map((t) => (
@@ -306,18 +366,24 @@ function SettingsForm({
           </p>
         </section>
 
-        <label className="mb-4 block text-[13px] text-muted">
+        <section className="panel-surface p-4">
+        <label className="block text-[13px] text-muted">
           Workspace folder
           <input
             value={workspace}
             onChange={(e) => setWorkspace(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[13px] text-text outline-none focus:border-teal/40"
+            className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[13px] text-text outline-none"
           />
         </label>
-        <button type="button" onClick={() => void save()} className="w-full rounded-lg bg-teal/20 py-2.5 text-[15px] text-teal hover:bg-teal/30">
-          Save
-        </button>
-      </div>
+        </section>
+        <div className="sticky bottom-0 flex justify-end border-t border-line bg-bg-2/95 py-4 backdrop-blur">
+          <button type="button" onClick={() => void save()} className="rounded-lg bg-teal px-5 py-2.5 text-[13px] font-medium text-bg hover:bg-teal/90">
+            Save changes
+          </button>
+        </div>
+        </div>
+        </main>
+    </div>
     </div>
   );
 }

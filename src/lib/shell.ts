@@ -26,6 +26,7 @@ type ShellState = {
 type ShellBag = Map<string, ShellState>;
 
 const g = globalThis as typeof globalThis & { __doveeShells?: ShellBag };
+const pending = new Map<string, Promise<ShellState>>();
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
@@ -127,11 +128,21 @@ function spawnShell(id: string, cwd: string, cols = DEFAULT_COLS, rows = DEFAULT
 }
 
 export async function getShell(id: string, cols?: number, rows?: number) {
-  const cwd = await getWorkspaceRoot();
-  const existing = shells().get(id);
-  if (existing && existing.cwd === cwd) return existing;
-  if (existing) terminate(existing);
-  return spawnShell(id, cwd, cols, rows);
+  const waiting = pending.get(id);
+  if (waiting) return waiting;
+  const creation = (async () => {
+    const cwd = await getWorkspaceRoot();
+    const existing = shells().get(id);
+    if (existing && existing.cwd === cwd) return existing;
+    if (existing) terminate(existing);
+    return spawnShell(id, cwd, cols, rows);
+  })();
+  pending.set(id, creation);
+  try {
+    return await creation;
+  } finally {
+    pending.delete(id);
+  }
 }
 
 export async function writeShell(id: string, data: string) {

@@ -138,7 +138,8 @@ export function uid() {
 }
 
 function makeChat(n: number): AgentChat {
-  return { id: uid(), title: n <= 1 ? "New chat" : `Chat ${n}`, messages: [], streaming: false };
+  // Keep the server-rendered first chat deterministic; subsequent chats are client-only.
+  return { id: n === 1 ? "chat-1" : uid(), title: n <= 1 ? "New chat" : `Chat ${n}`, messages: [], streaming: false };
 }
 
 function patchChat(chats: AgentChat[], id: string, fn: (c: AgentChat) => AgentChat) {

@@ -23,6 +23,7 @@ function TerminalSession({ id, active }: { id: string; active: boolean }) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const pushSizeRef = useRef<() => void>(() => {});
+  const writeQueueRef = useRef(Promise.resolve());
   const fontSize = useIde((s) => s.settings?.editorFontSize ?? 15);
   const theme = (useIde((s) => s.settings?.theme) ?? "dark") as ThemeId;
 
@@ -46,13 +47,19 @@ function TerminalSession({ id, active }: { id: string; active: boolean }) {
     term.loadAddon(fit);
     term.open(host.current);
     termRef.current = term;
+    term.focus();
 
     const post = (payload: Record<string, unknown>) => {
-      void fetch("/api/terminal", {
+      const request = () => fetch("/api/terminal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, ...payload }),
       });
+      if (typeof payload.data === "string") {
+        writeQueueRef.current = writeQueueRef.current.then(request).then(() => undefined).catch(() => undefined);
+      } else {
+        void request();
+      }
     };
 
     // Keystrokes go to the pty verbatim — the shell owns echo, line editing and
@@ -124,7 +131,15 @@ function TerminalSession({ id, active }: { id: string; active: boolean }) {
     }
   }, [active]);
 
-  return <div ref={host} className={cn("min-h-0 flex-1", !active && "hidden")} />;
+  return (
+    <div
+      ref={host}
+      onMouseDown={() => termRef.current?.focus()}
+      className={cn("min-h-0 flex-1 outline-none", !active && "hidden")}
+      role="application"
+      aria-label={`${id} terminal`}
+    />
+  );
 }
 
 export function TerminalPanel({ hideHeaderPlus = false }: { hideHeaderPlus?: boolean }) {
@@ -150,8 +165,8 @@ export function TerminalPanel({ hideHeaderPlus = false }: { hideHeaderPlus?: boo
   }
 
   return (
-    <div className="flex h-full flex-col bg-bg">
-      <div className="flex items-center gap-1 px-2 py-0.5">
+    <div className="flex h-full flex-col bg-[var(--editor-bg)]">
+      <div className="flex min-h-9 items-center gap-1 border-b border-line bg-bg-1 px-2 py-1">
         <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           {tabs.map((tab) => (
             <button
@@ -159,8 +174,8 @@ export function TerminalPanel({ hideHeaderPlus = false }: { hideHeaderPlus?: boo
               type="button"
               onClick={() => useIde.getState().setActiveTerm(tab.id)}
               className={cn(
-                "group flex items-center gap-1 rounded px-2 py-1 font-mono text-[11px]",
-                tab.id === active ? "bg-hover text-text" : "text-muted hover:bg-hover",
+                "group flex items-center gap-1 rounded-md border px-2.5 py-1.5 font-mono text-[11px]",
+                tab.id === active ? "border-teal/30 bg-teal/10 text-text" : "border-transparent text-muted hover:bg-hover",
               )}
             >
               {tab.name}
