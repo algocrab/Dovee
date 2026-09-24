@@ -17,6 +17,8 @@ export type Provider = {
   models: string[];
   docs: string;
   format: "openai" | "anthropic";
+  costTier: "low" | "mid" | "premium" | "custom";
+  strengths: string[];
 };
 
 export const PROVIDERS: Provider[] = [
@@ -27,6 +29,8 @@ export const PROVIDERS: Provider[] = [
     models: ["deepseek-flash", "deepseek-v4-pro"],
     docs: "https://platform.deepseek.com",
     format: "openai",
+    costTier: "low",
+    strengths: ["Long context", "Reasoning", "Tool use"],
   },
   {
     id: "openai",
@@ -35,6 +39,8 @@ export const PROVIDERS: Provider[] = [
     models: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "o3", "o4-mini"],
     docs: "https://platform.openai.com/api-keys",
     format: "openai",
+    costTier: "premium",
+    strengths: ["Reliability", "Tool use", "Broad models"],
   },
   {
     id: "xai",
@@ -43,6 +49,8 @@ export const PROVIDERS: Provider[] = [
     models: ["grok-4.5", "grok-4", "grok-3", "grok-3-mini"],
     docs: "https://console.x.ai",
     format: "openai",
+    costTier: "mid",
+    strengths: ["Long context", "Reasoning"],
   },
   {
     id: "anthropic",
@@ -51,6 +59,8 @@ export const PROVIDERS: Provider[] = [
     models: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
     docs: "https://console.anthropic.com",
     format: "anthropic",
+    costTier: "premium",
+    strengths: ["Code quality", "Long context", "Tool use"],
   },
   {
     id: "google",
@@ -59,6 +69,8 @@ export const PROVIDERS: Provider[] = [
     models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
     docs: "https://aistudio.google.com/apikey",
     format: "openai",
+    costTier: "low",
+    strengths: ["Long context", "Fast"],
   },
   {
     id: "groq",
@@ -67,6 +79,8 @@ export const PROVIDERS: Provider[] = [
     models: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "qwen/qwen3-32b"],
     docs: "https://console.groq.com/keys",
     format: "openai",
+    costTier: "low",
+    strengths: ["Very fast", "Open models"],
   },
   {
     id: "openrouter",
@@ -81,6 +95,8 @@ export const PROVIDERS: Provider[] = [
     ],
     docs: "https://openrouter.ai/keys",
     format: "openai",
+    costTier: "custom",
+    strengths: ["Model choice", "Fallbacks"],
   },
   {
     id: "mistral",
@@ -89,6 +105,8 @@ export const PROVIDERS: Provider[] = [
     models: ["mistral-large-latest", "codestral-latest", "mistral-small-latest"],
     docs: "https://console.mistral.ai",
     format: "openai",
+    costTier: "mid",
+    strengths: ["Code models", "EU hosting"],
   },
   {
     id: "together",
@@ -97,6 +115,8 @@ export const PROVIDERS: Provider[] = [
     models: ["meta-llama/Llama-3.3-70B-Instruct-Turbo", "Qwen/Qwen2.5-Coder-32B-Instruct"],
     docs: "https://api.together.xyz",
     format: "openai",
+    costTier: "low",
+    strengths: ["Open models", "Fast"],
   },
   {
     id: "custom",
@@ -105,6 +125,8 @@ export const PROVIDERS: Provider[] = [
     models: [],
     docs: "",
     format: "openai",
+    costTier: "custom",
+    strengths: ["Bring your own endpoint"],
   },
 ];
 

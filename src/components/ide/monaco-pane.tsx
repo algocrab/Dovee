@@ -24,6 +24,8 @@ type TypeResponse = {
 
 const loadedPackages = new Set<string>();
 const loadedLibPaths = new Set<string>();
+const completionCache = new Map<string, string>();
+const completionInFlight = new Map<string, AbortController>();
 let baseTypesPromise: Promise<TypeResponse> | null = null;
 let baseTypesReady = false;
 
@@ -126,6 +128,76 @@ function appearanceOptions(fontSize: number, wordWrap: boolean, minimap: boolean
     wordWrap: (wordWrap ? "on" : "off") as "on" | "off",
     glyphMargin: true,
   };
+}
+
+function registerInlineCompletion(monaco: Parameters<OnMount>[1]) {
+  return monaco.languages.registerInlineCompletionsProvider(
+    ["typescript", "typescriptreact", "javascript", "javascriptreact", "json", "css", "html", "markdown"],
+    {
+      provideInlineCompletions: async (model, position, _context, token) => {
+        const settings = useIde.getState().settings;
+        if (!settings?.completionEnabled || token.isCancellationRequested) return { items: [] };
+        const filePath = model.uri.path.replace(/^\/+/, "");
+        if (settings.completionExcludedPaths.some((path) => filePath.startsWith(path))) return { items: [] };
+        const prefix = model.getValueInRange({
+          startLineNumber: Math.max(1, position.lineNumber - 80),
+          startColumn: 1,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        });
+        const suffix = model.getValueInRange({
+          startLineNumber: position.lineNumber,
+          startColumn: position.column,
+          endLineNumber: Math.min(model.getLineCount(), position.lineNumber + 30),
+          endColumn: model.getLineMaxColumn(Math.min(model.getLineCount(), position.lineNumber + 30)),
+        });
+        if (prefix.trim().length < 3 || (!prefix.endsWith(" ") && !prefix.endsWith("\n") && !/[.(,[{=:+\-*/]$/.test(prefix))) {
+          return { items: [] };
+        }
+        const key = `${settings.provider}:${settings.completionModel}:${filePath}:${prefix.slice(-1200)}:${suffix.slice(0, 300)}`;
+        const cached = completionCache.get(key);
+        let completion = cached;
+        if (!completion) {
+          completionInFlight.get(filePath)?.abort();
+          const controller = new AbortController();
+          completionInFlight.set(filePath, controller);
+          const response = await fetch("/api/completion", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({
+              prefix,
+              suffix,
+              language: model.getLanguageId(),
+              filePath,
+            }),
+          }).catch(() => null);
+          if (!response || controller.signal.aborted || token.isCancellationRequested) return { items: [] };
+          const data = (await response.json().catch(() => null)) as { completion?: string } | null;
+          completion = data?.completion?.slice(0, 4000);
+          if (completion) {
+            completionCache.set(key, completion);
+            if (completionCache.size > 100) completionCache.delete(completionCache.keys().next().value ?? key);
+          }
+        }
+        if (!completion || token.isCancellationRequested) return { items: [] };
+        return {
+          items: [
+            {
+              insertText: completion,
+              range: {
+                startLineNumber: position.lineNumber,
+                startColumn: position.column,
+                endLineNumber: position.lineNumber,
+                endColumn: position.column,
+              },
+            },
+          ],
+        };
+      },
+      freeInlineCompletions: () => undefined,
+    },
+  );
 }
 
 function defineThemes(monaco: Parameters<OnMount>[1]) {
@@ -324,6 +396,7 @@ export function MonacoPane({ groupId }: { groupId: string }) {
     applyExtensionEditorTheme(monaco, useIde.getState().extensions, useIde.getState().extensionThemeId, MONACO_THEME[theme]);
     syncExtensionSnippets(monaco, useIde.getState().extensions);
     editor.updateOptions(appearanceOptions(fontSize, wordWrap, minimap));
+    const inlineCompletion = registerInlineCompletion(monaco);
     void loadTypeLibs(monaco).then(() => {
       const model = editor.getModel();
       if (model) schedulePackageScan(monaco, model.getValue());
@@ -415,6 +488,7 @@ export function MonacoPane({ groupId }: { groupId: string }) {
       }
     });
     editor.onDidDispose(() => {
+      inlineCompletion.dispose();
       if (editorRef.current === editor) editorRef.current = null;
       // The Editor is keyed by path, so a tab switch disposes it and clears the popup here.
       setSpot(null);

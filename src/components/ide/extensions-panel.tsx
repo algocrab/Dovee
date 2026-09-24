@@ -45,6 +45,11 @@ export function ExtensionsPanel() {
               </div>
               {ext.description ? <p className="mt-2 text-[12px] text-muted">{ext.description}</p> : null}
               <div className="mt-2 flex flex-wrap gap-1">
+                {ext.permissions.map((permission) => (
+                  <span key={permission} className="rounded-md bg-gold/10 px-1.5 py-0.5 font-mono text-[10px] text-gold">
+                    {permission}
+                  </span>
+                ))}
                 {ext.themes.length ? (
                   <span className="rounded-md bg-hover px-1.5 py-0.5 font-mono text-[10px] text-muted">
                     {ext.themes.length} theme

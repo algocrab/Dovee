@@ -1,13 +1,38 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { closeAllTabs, closeTabSafe, createNewFile, formatActive, openFolder, openNewWindow, persistAppearance, pickOpenFile, saveAll, saveTab } from "./actions";
+import { closeAllTabs, closeTabSafe, createNewFile, formatActive, openFolder, openNewWindow, persistAppearance, pickOpenFile, runProjectTests, saveAll, saveTab } from "./actions";
 import { startDebugging, stopDebugging } from "./debug-actions";
 import { runExtensionCommand } from "./extension-actions";
 import { openFile } from "./file-tree";
 import { useIde } from "@/stores/ide-store";
 
 type Command = { id: string; label: string; run: () => void };
+
+function fuzzyScore(value: string, query: string) {
+  if (!query) return 0;
+  const text = value.toLowerCase();
+  let cursor = 0;
+  let score = 0;
+  let streak = 0;
+  for (const char of query.toLowerCase()) {
+    const index = text.indexOf(char, cursor);
+    if (index < 0) return null;
+    streak = index === cursor ? streak + 1 : 0;
+    score += 10 + streak * 4 + (index === 0 || "/-_ .".includes(text[index - 1] ?? "") ? 8 : 0);
+    cursor = index + 1;
+  }
+  return score - (text.length - query.length);
+}
+
+function fuzzyHits<T>(items: T[], query: string, getText: (item: T) => string) {
+  return items
+    .map((item) => ({ item, score: fuzzyScore(getText(item), query) }))
+    .filter((entry): entry is { item: T; score: number } => entry.score !== null)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 40)
+    .map((entry) => entry.item);
+}
 
 export function CommandPalette() {
   const open = useIde((s) => s.commandOpen);
@@ -47,6 +72,7 @@ function CommandPaletteInner() {
       { id: "join", label: "Join Editor Groups", run: () => g().joinEditors() },
       { id: "explorer", label: "Show Explorer", run: () => g().setLeftTab("explorer") },
       { id: "search", label: "Show Search", run: () => g().setLeftTab("search") },
+      { id: "context", label: "Show Context Inspector", run: () => g().setLeftTab("context") },
       { id: "git", label: "Show Source Control", run: () => g().setLeftTab("git") },
       { id: "debug", label: "Show Run and Debug", run: () => g().setLeftTab("debug") },
       { id: "extensions", label: "Show Extensions", run: () => g().setLeftTab("extensions") },
@@ -62,6 +88,7 @@ function CommandPaletteInner() {
       { id: "wrap", label: "Toggle Word Wrap", run: () => void persistAppearance({ wordWrap: !(g().settings?.wordWrap ?? true) }) },
       { id: "map", label: "Toggle Minimap", run: () => void persistAppearance({ minimap: !(g().settings?.minimap ?? false) }) },
       { id: "format", label: "Format Document", run: () => void formatActive() },
+      { id: "tests", label: "Run Project Tests", run: () => void runProjectTests() },
       { id: "zoom-in", label: "Increase Font Size", run: () => void persistAppearance({ editorFontSize: Math.min(22, (g().settings?.editorFontSize ?? 15) + 1) }) },
       { id: "zoom-out", label: "Decrease Font Size", run: () => void persistAppearance({ editorFontSize: Math.max(11, (g().settings?.editorFontSize ?? 15) - 1) }) },
       ...extra,
@@ -71,11 +98,11 @@ function CommandPaletteInner() {
   const isCmd = q.startsWith(">");
   const needle = (isCmd ? q.slice(1) : q).toLowerCase().trim();
   const fileHits = useMemo(
-    () => files.filter((f) => f.toLowerCase().includes(needle)).slice(0, 40),
+    () => fuzzyHits(files, needle, (file) => file),
     [files, needle],
   );
   const cmdHits = useMemo(
-    () => commands.filter((c) => c.label.toLowerCase().includes(needle)).slice(0, 40),
+    () => fuzzyHits(commands, needle, (command) => command.label),
     [commands, needle],
   );
   const hits = isCmd ? cmdHits : fileHits;

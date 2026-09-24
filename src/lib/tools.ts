@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 import { applyUnifiedDiff, packFileDiff, type FileDiff } from "./diff";
 import { isBinaryPath } from "./ignore";
 import { searchWorkspace } from "./search";
+import { queryWorkspaceContext } from "./indexer";
+import { saveRecoverySnapshot } from "./recovery";
 import { getWorkspaceRoot, listDir, pathExists, resolveSafe, toPosix } from "./workspace";
 
 const execFileAsync = promisify(execFile);
@@ -13,6 +15,7 @@ export type ToolName =
   | "read_file"
   | "list_directory"
   | "search_codebase"
+  | "inspect_context"
   | "write_file"
   | "apply_diff"
   | "run_terminal"
@@ -78,6 +81,22 @@ export const TOOL_SCHEMAS = [
             description: "Treat query as regex. Default true for the agent; UI may pass false for literal search.",
           },
           whole_word: { type: "boolean", description: "Match whole words only" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "inspect_context",
+      description: "Rank relevant workspace files, symbols, and imports for the current task before reading them.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Task, symbol, or file name to rank" },
+          active_file: { type: "string", description: "Current file path, if any" },
+          refresh: { type: "boolean", description: "Rebuild the local index before ranking" },
         },
         required: ["query"],
       },
@@ -244,6 +263,18 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
           output: hits.length ? `${hits.join("\n")}${more}` : "No matches.",
         };
       }
+      case "inspect_context": {
+        const query = String(args.query ?? "");
+        if (!query) return { ok: false, output: "query is required" };
+        const hits = await queryWorkspaceContext(query, args.active_file ? String(args.active_file) : undefined, Boolean(args.refresh));
+        if (!hits.length) return { ok: true, output: "No indexed context matches." };
+        return {
+          ok: true,
+          output: hits
+            .map((hit) => `${hit.path} [${hit.reason}; score ${hit.score}] symbols=${hit.symbols.slice(0, 8).join(", ") || "none"} imports=${hit.imports.slice(0, 8).join(", ") || "none"}`)
+            .join("\n"),
+        };
+      }
       case "write_file": {
         const rel = String(args.path ?? "");
         const abs = resolveSafe(root, rel);
@@ -251,6 +282,9 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
         let original = "";
         const existed = await pathExists(abs);
         if (existed && !isBinaryPath(abs)) original = await fs.readFile(abs, "utf8");
+        if (original !== modified) {
+          await saveRecoverySnapshot({ path: rel, original, modified });
+        }
         await fs.mkdir(path.dirname(abs), { recursive: true });
         await fs.writeFile(abs, modified, "utf8");
         const posix = toPosix(root, abs);
@@ -264,6 +298,9 @@ export async function executeTool(name: string, rawArgs: string): Promise<ToolRe
         if (!(await pathExists(abs))) return { ok: false, output: `File not found: ${rel}` };
         const original = await fs.readFile(abs, "utf8");
         const next = applyUnifiedDiff(original, String(args.diff ?? ""));
+        if (original !== next) {
+          await saveRecoverySnapshot({ path: rel, original, modified: next });
+        }
         await fs.writeFile(abs, next, "utf8");
         const posix = toPosix(root, abs);
         const diff = original !== next ? packFileDiff(posix, original, next) : undefined;

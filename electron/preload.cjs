@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld("doveeDesktop", {
   maximize: () => ipcRenderer.send("window:maximize"),
   close: () => ipcRenderer.send("window:close"),
   pickFolder: (startPath) => ipcRenderer.invoke("folder:pick", startPath),
+  storeApiKey: (provider, apiKey) => ipcRenderer.invoke("settings:store-api-key", provider, apiKey),
 });

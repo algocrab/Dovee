@@ -24,6 +24,11 @@ export type DoveeSettings = {
   autoSave: boolean;
   /** Run prettier over the buffer before it is written on save. */
   formatOnSave: boolean;
+  completionEnabled: boolean;
+  completionModel: string;
+  completionPrivacy: "local-context" | "workspace";
+  completionExcludedPaths: string[];
+  collaborationEnabled: boolean;
   maxToolRounds: number;
   /** Extension ids that should not activate. */
   disabledExtensions: string[];
@@ -111,11 +116,24 @@ const DEFAULTS: DoveeSettings = {
   autoSave: false,
   // Opt-in: formatting rewrites the whole file, so it never happens unasked.
   formatOnSave: false,
+  completionEnabled: true,
+  completionModel: "",
+  completionPrivacy: "local-context",
+  completionExcludedPaths: [],
+  collaborationEnabled: false,
   maxToolRounds: DEFAULT_MAX_TOOL_ROUNDS,
   disabledExtensions: [],
 };
 
 function envKey(provider: string) {
+  try {
+    const secure = JSON.parse(process.env.DOVEE_SECURE_KEYS ?? "{}") as Record<string, unknown>;
+    const value = secure[provider];
+    if (typeof value === "string" && value) return value;
+  } catch {
+    /* ignore malformed runtime-only secure settings */
+  }
+  if (process.env.DOVEE_RUNTIME_API_KEY) return process.env.DOVEE_RUNTIME_API_KEY;
   for (const name of ENV_KEYS[provider] ?? []) {
     const v = process.env[name];
     if (v) return v;
@@ -173,6 +191,15 @@ export async function loadSettings(): Promise<DoveeSettings> {
     autoSave: typeof stored.autoSave === "boolean" ? stored.autoSave : DEFAULTS.autoSave,
     formatOnSave:
       typeof stored.formatOnSave === "boolean" ? stored.formatOnSave : DEFAULTS.formatOnSave,
+    completionEnabled:
+      typeof stored.completionEnabled === "boolean" ? stored.completionEnabled : DEFAULTS.completionEnabled,
+    completionModel: typeof stored.completionModel === "string" ? stored.completionModel : DEFAULTS.completionModel,
+    completionPrivacy: stored.completionPrivacy === "workspace" ? "workspace" : DEFAULTS.completionPrivacy,
+    completionExcludedPaths: Array.isArray(stored.completionExcludedPaths)
+      ? stored.completionExcludedPaths.filter((item): item is string => typeof item === "string").slice(0, 100)
+      : [],
+    collaborationEnabled:
+      typeof stored.collaborationEnabled === "boolean" ? stored.collaborationEnabled : DEFAULTS.collaborationEnabled,
     maxToolRounds: clampMaxToolRounds(stored.maxToolRounds),
     disabledExtensions: Array.isArray(stored.disabledExtensions)
       ? stored.disabledExtensions.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length < 80).slice(0, 100)
@@ -195,6 +222,9 @@ export async function saveSettings(patch: Partial<DoveeSettings>) {
 
   const packaged = isPackagedApp() || Boolean(process.env.DOVEE_WORKSPACE?.trim());
   const fileOut: DoveeSettings = { ...next };
+  const keepApiKeyOutOfSettingsFile = Boolean(
+    process.env.DOVEE_PACKAGED || process.env.DOVEE_SECURE_SETTINGS === "1",
+  );
   if (packaged) {
     if (typeof patch.workspace === "string" && patch.workspace.trim()) {
       next.desktopWorkspace = next.workspace;
@@ -211,6 +241,11 @@ export async function saveSettings(patch: Partial<DoveeSettings>) {
   }
   if (!fileOut.desktopWorkspace?.trim()) {
     delete fileOut.desktopWorkspace;
+  }
+  if (keepApiKeyOutOfSettingsFile) {
+    const persisted = fileOut as Partial<DoveeSettings>;
+    delete persisted.apiKey;
+    delete persisted.apiKeys;
   }
 
   await fs.mkdir(SETTINGS_DIR, { recursive: true });
@@ -237,6 +272,11 @@ export function publicSettings(settings: DoveeSettings) {
     minimap: settings.minimap,
     autoSave: settings.autoSave,
     formatOnSave: settings.formatOnSave,
+    completionEnabled: settings.completionEnabled,
+    completionModel: settings.completionModel,
+    completionPrivacy: settings.completionPrivacy,
+    completionExcludedPaths: settings.completionExcludedPaths,
+    collaborationEnabled: settings.collaborationEnabled,
     maxToolRounds: settings.maxToolRounds,
   };
 }

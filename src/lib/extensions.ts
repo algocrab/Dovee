@@ -136,6 +136,15 @@ function parseManifest(raw: unknown, fallbackId: string): ExtensionManifest | nu
     description: typeof row.description === "string" ? row.description.trim().slice(0, 280) : "",
     publisher: typeof row.publisher === "string" ? row.publisher.trim().slice(0, 80) : undefined,
     main: typeof row.main === "string" ? row.main.trim() : undefined,
+    engines: row.engines?.vscode ? { vscode: String(row.engines.vscode).slice(0, 32) } : undefined,
+    activationEvents: Array.isArray(row.activationEvents)
+      ? row.activationEvents.filter((event): event is string => typeof event === "string").slice(0, 20)
+      : [],
+    permissions: Array.isArray(row.permissions)
+      ? row.permissions.filter((permission): permission is NonNullable<ExtensionManifest["permissions"]>[number] =>
+          ["workspace.read", "workspace.write", "commands", "status", "editor"].includes(permission as string),
+        )
+      : ["commands", "status"],
     contributes: {
       commands: asCommands(row.contributes?.commands),
       snippets: asSnippets(row.contributes?.snippets),
@@ -303,6 +312,7 @@ async function collect() {
     version: item.manifest.version,
     description: item.manifest.description,
     publisher: item.manifest.publisher,
+    permissions: item.manifest.permissions ?? ["commands", "status"],
     enabled: !disabled.has(item.manifest.id),
     source: item.source,
     folder: item.folder ? toPosix(root, item.folder) : undefined,

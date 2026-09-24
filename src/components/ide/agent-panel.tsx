@@ -206,6 +206,8 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
   const messages = chat?.messages ?? [];
   const streaming = chat?.streaming ?? false;
   const hasKey = useIde((s) => s.settings?.hasApiKey);
+  const provider = useIde((s) => s.settings?.provider ?? "deepseek");
+  const model = useIde((s) => s.settings?.model ?? "deepseek-flash");
   const [pending, setPending] = useState<Record<string, ChatAttachment[]>>({});
   const [dragging, setDragging] = useState(false);
   const draft = useIde((s) => s.drafts[activeChatId] ?? "");
@@ -360,6 +362,9 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
           if (!ev || !dataLine) continue;
           const data = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
           const s = useIde.getState();
+          if (ev === "phase") {
+            s.setStatus(String(data.label ?? "Dovee is working…"));
+          }
           if (ev === "thinking") s.appendThinking(chatId, String(data.text ?? ""));
           if (ev === "content") s.appendContent(chatId, String(data.text ?? ""));
           if (ev === "tool_start") {
@@ -504,6 +509,12 @@ export function AgentPanel({ abortRef }: { abortRef: MutableRefObject<Map<string
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
+      </div>
+      <div className="flex items-center justify-between border-b border-line/70 bg-bg px-3 py-1.5 text-[11px] text-muted">
+        <span className="truncate">Task agent</span>
+        <span className="max-w-[68%] truncate font-mono text-teal/80" title={`${provider} · ${model}`}>
+          {provider} · {model}
+        </span>
       </div>
       <div
         ref={scroller}

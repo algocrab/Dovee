@@ -26,11 +26,15 @@ export async function saveTab(path: string) {
   // Re-read: formatting may have swapped the buffer since we looked at it.
   const fresh = useIde.getState().tabs.find((t) => t.path === path);
   if (!fresh) return;
-  await fetch("/api/files/write", {
+  const response = await fetch("/api/files/write", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: fresh.path, content: fresh.content }),
+    body: JSON.stringify({ path: fresh.sourcePath ?? fresh.path, content: fresh.content }),
   });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(detail?.error ?? `Could not save ${path}`);
+  }
   useIde.getState().markSaved(path);
   useIde.getState().setStatus(`Saved ${path}${formatted ? " (formatted)" : ""}`);
 }
@@ -82,8 +86,17 @@ export async function formatActive() {
 
 export async function saveAll() {
   const dirty = useIde.getState().tabs.filter((t) => t.kind !== "diff" && t.content !== t.original);
-  for (const tab of dirty) await saveTab(tab.path);
-  if (dirty.length) useIde.getState().setStatus(`Saved ${dirty.length} file${dirty.length === 1 ? "" : "s"}`);
+  let saved = 0;
+  for (const tab of dirty) {
+    try {
+      await saveTab(tab.path);
+      saved += 1;
+    } catch (error) {
+      useIde.getState().setStatus(error instanceof Error ? error.message : `Could not save ${tab.path}`);
+      break;
+    }
+  }
+  if (saved) useIde.getState().setStatus(`Saved ${saved} file${saved === 1 ? "" : "s"}`);
 }
 
 export function closeTabSafe(path: string, groupId?: string) {
@@ -187,6 +200,22 @@ export function openNewWindow() {
 
 export function pickOpenFile() {
   useIde.getState().setCommandOpen(true, "files");
+}
+
+export async function runProjectTests() {
+  const state = useIde.getState();
+  state.setBottomTab("terminal");
+  state.setStatus("Running project tests…");
+  try {
+    const response = await fetch("/api/terminal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: state.activeTermId, data: "npm test\r" }),
+    });
+    if (!response.ok) throw new Error("Could not start project tests");
+  } catch (error) {
+    state.setStatus(error instanceof Error ? error.message : "Could not start project tests");
+  }
 }
 
 async function pickFolderPath() {

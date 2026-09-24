@@ -40,10 +40,15 @@ export type PublicSettings = {
   minimap: boolean;
   autoSave: boolean;
   formatOnSave: boolean;
+  completionEnabled: boolean;
+  completionModel: string;
+  completionPrivacy: "local-context" | "workspace";
+  completionExcludedPaths: string[];
+  collaborationEnabled: boolean;
   maxToolRounds: number;
 };
 
-export type LeftTab = "explorer" | "search" | "git" | "debug" | "extensions";
+export type LeftTab = "explorer" | "search" | "context" | "git" | "debug" | "extensions";
 
 export type Problem = {
   path: string;

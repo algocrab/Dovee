@@ -17,10 +17,11 @@ Shell: PowerShell
 1. read_file(path, start_line?, end_line?) — Read a file. Use line ranges for large files.
 2. list_directory(path) — List files and folders at a path.
 3. search_codebase(query, path_glob?) — Regex/keyword search across the project. Use this before editing unfamiliar code.
-4. write_file(path, content) — Overwrite a file completely. Only for new files or full rewrites.
-5. apply_diff(path, diff) — Apply a unified diff to an existing file. PREFER this over write_file for edits.
-6. run_terminal(command, cwd?) — Run a shell command (tests, linters, builds, git). Output is returned to you.
-7. get_diagnostics(path?) — TypeScript compiler errors for a file or the whole project.
+4. inspect_context(query, active_file?, refresh?) — Rank relevant files, symbols, and imports from the local workspace index.
+5. write_file(path, content) — Overwrite a file completely. Only for new files or full rewrites.
+6. apply_diff(path, diff) — Apply a unified diff to an existing file. PREFER this over write_file for edits.
+7. run_terminal(command, cwd?) — Run a shell command (tests, linters, builds, git). Output is returned to you.
+8. get_diagnostics(path?) — TypeScript compiler errors for a file or the whole project.
 
 ## Operating rules
 

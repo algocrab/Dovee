@@ -11,8 +11,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as Partial<DoveeSettings>;
+  const body = (await req.json()) as Partial<DoveeSettings> & { secureKeyStored?: boolean };
   const patch: Partial<DoveeSettings> = {};
+  if (body.secureKeyStored === true) {
+    process.env.DOVEE_SECURE_SETTINGS = "1";
+  }
   if (typeof body.apiKey === "string") patch.apiKey = body.apiKey.trim();
   if (typeof body.model === "string" && body.model.trim()) patch.model = body.model.trim();
   if (typeof body.provider === "string" && PROVIDERS.some((p) => p.id === body.provider)) {
@@ -44,6 +47,19 @@ export async function POST(req: Request) {
   if (typeof body.minimap === "boolean") patch.minimap = body.minimap;
   if (typeof body.autoSave === "boolean") patch.autoSave = body.autoSave;
   if (typeof body.formatOnSave === "boolean") patch.formatOnSave = body.formatOnSave;
+  if (typeof body.completionEnabled === "boolean") patch.completionEnabled = body.completionEnabled;
+  if (typeof body.completionModel === "string") patch.completionModel = body.completionModel.trim();
+  if (body.completionPrivacy === "local-context" || body.completionPrivacy === "workspace") {
+    patch.completionPrivacy = body.completionPrivacy;
+  }
+  if (Array.isArray(body.completionExcludedPaths)) {
+    patch.completionExcludedPaths = body.completionExcludedPaths
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 100);
+  }
+  if (typeof body.collaborationEnabled === "boolean") patch.collaborationEnabled = body.collaborationEnabled;
   if (typeof body.maxToolRounds === "number") patch.maxToolRounds = clampMaxToolRounds(body.maxToolRounds);
   const next = await saveSettings(patch);
   if (patch.workspace) {

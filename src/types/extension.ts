@@ -43,6 +43,10 @@ export type ExtensionManifest = {
   description: string;
   publisher?: string;
   main?: string;
+  /** VS Code-compatible metadata accepted by Dovee's safe subset. */
+  engines?: { vscode?: string };
+  activationEvents?: string[];
+  permissions?: Array<"workspace.read" | "workspace.write" | "commands" | "status" | "editor">;
   contributes?: {
     commands?: ExtensionCommand[];
     snippets?: ExtensionSnippet[];
@@ -57,6 +61,7 @@ export type ExtensionInfo = {
   version: string;
   description: string;
   publisher?: string;
+  permissions: string[];
   enabled: boolean;
   source: ExtensionSource;
   folder?: string;

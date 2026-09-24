@@ -1,6 +1,6 @@
 "use client";
 
-import { Bug, Files, GitBranch, Puzzle, Search, Settings, SquareTerminal, SunMoon, WandSparkles } from "lucide-react";
+import { BrainCircuit, Bug, Files, GitBranch, Puzzle, Search, Settings, SquareTerminal, SunMoon, WandSparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useDesktopApp } from "@/lib/desktop";
@@ -12,6 +12,7 @@ import { AgentPanel } from "./agent-panel";
 import { BottomPanel } from "./bottom-panel";
 import { DoveeWordmark, IconButton, StatusSep } from "./chrome";
 import { CommandPalette } from "./command-palette";
+import { ContextPanel } from "./context-panel";
 import { DebugPanel } from "./debug-panel";
 import { debugAction, startDebugging, stopDebugging, toggleBreakpointAt } from "./debug-actions";
 import { EditorWorkspace } from "./editor-group";
@@ -110,7 +111,9 @@ export function IdeShell() {
   useEffect(() => {
     if (!settings?.autoSave) return;
     const timer = setInterval(() => {
-      void saveAll();
+      void saveAll().catch((error) => {
+        useIde.getState().setStatus(error instanceof Error ? error.message : "Auto-save failed");
+      });
     }, 4000);
     return () => clearInterval(timer);
   }, [settings?.autoSave]);
@@ -328,6 +331,9 @@ export function IdeShell() {
           <RailBtn active={leftTab === "search"} onClick={() => useIde.getState().setLeftTab("search")} title="Search">
             <Search className="h-[18px] w-[18px]" />
           </RailBtn>
+          <RailBtn active={leftTab === "context"} onClick={() => useIde.getState().setLeftTab("context")} title="Context Inspector">
+            <BrainCircuit className="h-[18px] w-[18px]" />
+          </RailBtn>
           <RailBtn active={leftTab === "git"} onClick={() => useIde.getState().setLeftTab("git")} title="Git">
             <GitBranch className="h-[18px] w-[18px]" />
           </RailBtn>
@@ -351,6 +357,8 @@ export function IdeShell() {
             <FileTree />
           ) : leftTab === "search" ? (
             <SearchPanel />
+          ) : leftTab === "context" ? (
+            <ContextPanel />
           ) : leftTab === "debug" ? (
             <DebugPanel />
           ) : leftTab === "extensions" ? (

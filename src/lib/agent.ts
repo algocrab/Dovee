@@ -14,6 +14,7 @@ import type { FileDiff } from "./diff";
 import { executeTool, TOOL_SCHEMAS } from "./tools";
 
 export type AgentEvent =
+  | { type: "phase"; phase: "plan" | "inspect" | "change" | "validate" | "review" | "finish"; label: string }
   | { type: "thinking"; text: string }
   | { type: "content"; text: string }
   | { type: "tool_start"; id: string; name: string; arguments: string }
@@ -85,6 +86,12 @@ export async function* runAgent(
     if (signal?.aborted) return;
 
     const hitSafetyCap = round === maxRounds - 1;
+    const phase =
+      round === 0 ? { phase: "plan" as const, label: "Planning task" } :
+      round === 1 ? { phase: "inspect" as const, label: "Inspecting workspace context" } :
+      hitSafetyCap ? { phase: "finish" as const, label: "Preparing final result" } :
+      { phase: "change" as const, label: "Applying changes and validating" };
+    yield { type: "phase", ...phase };
     const forceFinish = hitSafetyCap || skippedRounds >= STALL_STOP_AFTER;
     if (forceFinish) {
       messages.push({

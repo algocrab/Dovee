@@ -9,6 +9,7 @@ declare global {
       maximize: () => void;
       close: () => void;
       pickFolder: (startPath?: string) => Promise<string | null>;
+      storeApiKey: (provider: string, apiKey: string) => Promise<boolean>;
     };
   }
 }

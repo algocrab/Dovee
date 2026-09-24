@@ -34,6 +34,14 @@ function SettingsForm({
   const [minimap, setMinimap] = useState(settings?.minimap ?? false);
   const [autoSave, setAutoSave] = useState(settings?.autoSave ?? false);
   const [formatOnSave, setFormatOnSave] = useState(settings?.formatOnSave ?? false);
+  const [completionEnabled, setCompletionEnabled] = useState(settings?.completionEnabled ?? true);
+  const [completionPrivacy, setCompletionPrivacy] = useState<"local-context" | "workspace">(
+    settings?.completionPrivacy ?? "local-context",
+  );
+  const [completionExcludedPaths, setCompletionExcludedPaths] = useState(
+    settings?.completionExcludedPaths?.join(", ") ?? "",
+  );
+  const [collaborationEnabled, setCollaborationEnabled] = useState(settings?.collaborationEnabled ?? false);
   const [maxToolRounds, setMaxToolRounds] = useState(settings?.maxToolRounds ?? 120);
 
   const preset = useMemo(() => getProvider(provider), [provider]);
@@ -57,8 +65,14 @@ function SettingsForm({
 
   async function save() {
     applyTheme(theme);
+    const secureKeyStored = Boolean(
+      apiKey &&
+        window.doveeDesktop?.isDesktop &&
+        (await window.doveeDesktop.storeApiKey(provider, apiKey)),
+    );
     const payload: Record<string, unknown> = {
         apiKey: apiKey || undefined,
+      secureKeyStored,
         provider,
         model,
         baseUrl,
@@ -69,6 +83,13 @@ function SettingsForm({
         minimap,
         autoSave,
         formatOnSave,
+        completionEnabled,
+        completionPrivacy,
+        completionExcludedPaths: completionExcludedPaths
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        collaborationEnabled,
         maxToolRounds,
       };
     if (workspace.trim() && workspace.trim() !== (settings?.workspace ?? "")) {
@@ -150,21 +171,66 @@ function SettingsForm({
         </section>
 
         <section className="mb-5">
+          <p className="mb-2 text-[13px] font-medium">Inline completion</p>
+          <div className="grid gap-2">
+            <Switch checked={completionEnabled} onChange={setCompletionEnabled} label="Enable inline suggestions" />
+            <label className="block text-[13px] text-muted">
+              Context sent to the provider
+              <select
+                value={completionPrivacy}
+                onChange={(event) => setCompletionPrivacy(event.target.value as typeof completionPrivacy)}
+                className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-2 text-[13px] text-text outline-none"
+              >
+                <option value="local-context">Current file context only</option>
+                <option value="workspace">Include ranked workspace context</option>
+              </select>
+            </label>
+            <label className="block text-[13px] text-muted">
+              Excluded path prefixes
+              <input
+                value={completionExcludedPaths}
+                onChange={(event) => setCompletionExcludedPaths(event.target.value)}
+                placeholder="secrets/, .env, vendor/"
+                className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[13px] text-text outline-none"
+              />
+            </label>
+          </div>
+          <p className="mt-2 text-[12px] text-muted">
+            Suggestions use a small bounded context and can be disabled for sensitive folders.
+          </p>
+        </section>
+
+        <section className="mb-5">
+          <p className="mb-2 text-[13px] font-medium">Privacy and collaboration</p>
+          <Switch
+            checked={collaborationEnabled}
+            onChange={setCollaborationEnabled}
+            label="Enable collaboration foundation (experimental)"
+          />
+          <p className="mt-2 text-[12px] text-muted">
+            Disabled by default. Live shared editing is not enabled; this flag only prepares review bundles and audit metadata.
+          </p>
+        </section>
+
+        <section className="mb-5">
           <p className="mb-2 text-[13px] font-medium">AI provider</p>
-          <label className="mb-3 block text-[13px] text-muted">
-            Provider
-            <select
-              value={provider}
-              onChange={(e) => switchProvider(e.target.value as ProviderId)}
-              className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-2 text-[13px] text-text outline-none"
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            {PROVIDERS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => switchProvider(p.id)}
+                className={`rounded-xl border px-3 py-2 text-left transition-colors ${
+                  provider === p.id ? "border-teal bg-teal/10" : "border-line hover:bg-hover"
+                }`}
+              >
+                <span className={`block text-[13px] ${provider === p.id ? "text-teal" : "text-text"}`}>{p.label}</span>
+                <span className="mt-1 block text-[11px] text-muted">
+                  {p.costTier === "custom" ? "Your endpoint" : `${p.costTier} cost`} · {p.strengths.slice(0, 2).join(" · ")}
+                </span>
+              </button>
+            ))}
+          </div>
           <label className="mb-3 block text-[13px] text-muted">
             {preset.label} API key
             <input
@@ -234,8 +300,9 @@ function SettingsForm({
             </span>
           </label>
           <p className="text-[12px] text-muted">
-            Works with OpenAI-compatible APIs. Custom = any endpoint that speaks `/chat/completions`. Keys stay in{" "}
-            <span className="font-mono">~/.dovee/settings.json</span>.
+            Works with OpenAI-compatible APIs. Custom = any endpoint that speaks `/chat/completions`.
+            Desktop builds currently store settings in{" "}
+            <span className="font-mono">~/.dovee/settings.json</span>; use a machine you trust and do not commit this file.
           </p>
         </section>
 

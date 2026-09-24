@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, utilityProcess } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
@@ -118,6 +118,45 @@ function writeLog(message) {
       /* ignore */
     }
   }
+}
+
+function secureKeysFile() {
+  return path.join(app.getPath("userData"), "api-keys.json");
+}
+
+function readSecureKeys() {
+  try {
+    const values = JSON.parse(fs.readFileSync(secureKeysFile(), "utf8"));
+    if (!values || typeof values !== "object") return {};
+    const keys = {};
+    for (const [provider, encoded] of Object.entries(values)) {
+      if (typeof encoded !== "string") continue;
+      try {
+        keys[provider] = safeStorage.decryptString(Buffer.from(encoded, "base64"));
+      } catch {
+        /* Ignore an entry encrypted by an unavailable/changed OS key. */
+      }
+    }
+    return keys;
+  } catch {
+    return {};
+  }
+}
+
+function writeSecureKey(provider, apiKey) {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  const values = (() => {
+    try {
+      return JSON.parse(fs.readFileSync(secureKeysFile(), "utf8"));
+    } catch {
+      return {};
+    }
+  })();
+  if (apiKey) values[provider] = safeStorage.encryptString(apiKey).toString("base64");
+  else delete values[provider];
+  fs.mkdirSync(path.dirname(secureKeysFile()), { recursive: true });
+  fs.writeFileSync(secureKeysFile(), JSON.stringify(values), { mode: 0o600 });
+  return true;
 }
 
 function startStandalone() {
@@ -325,6 +364,16 @@ ipcMain.handle("folder:pick", async (_event, startPath) => {
   }
 });
 
+ipcMain.handle("settings:store-api-key", (_event, provider, apiKey) => {
+  if (typeof provider !== "string" || typeof apiKey !== "string") return false;
+  try {
+    return writeSecureKey(provider, apiKey.trim());
+  } catch (error) {
+    writeLog(`settings:store-api-key failed: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+});
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -345,6 +394,11 @@ if (!gotLock) {
 
     writeLog(`ready packaged=${app.isPackaged} standalone=${standaloneRoot()}`);
     if (app.isPackaged) setPackagedFlag();
+    const secureKeys = readSecureKeys();
+    if (Object.keys(secureKeys).length) {
+      process.env.DOVEE_SECURE_KEYS = JSON.stringify(secureKeys);
+      process.env.DOVEE_SECURE_SETTINGS = "1";
+    }
     const win = createWindow();
     void loadHtml(win, "Starting Dovee…");
 

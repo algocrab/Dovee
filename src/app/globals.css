@@ -18,6 +18,11 @@ html[data-theme="dark"] {
   --overlay: rgba(9, 9, 11, 0.55);
   --editor-bg: #0c0d12;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--teal) 18%, transparent);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
 
 html[data-theme="light"] {
@@ -36,6 +41,7 @@ html[data-theme="light"] {
   --overlay: rgba(28, 25, 22, 0.4);
   --editor-bg: #fffcf7;
   --shadow: 0 18px 50px rgba(28, 25, 22, 0.18);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--teal) 18%, transparent);
 }
 
 html[data-theme="dusk"] {
@@ -54,6 +60,7 @@ html[data-theme="dusk"] {
   --overlay: rgba(22, 18, 16, 0.55);
   --editor-bg: #1a1512;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--teal) 18%, transparent);
 }
 
 @theme inline {
@@ -101,7 +108,7 @@ select {
 }
 
 button {
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+  transition: background-color 0.12s var(--ease-standard), color 0.12s var(--ease-standard), border-color 0.12s var(--ease-standard), opacity 0.12s var(--ease-standard), transform 0.12s var(--ease-standard);
 }
 
 input[type="range"] {
@@ -112,7 +119,49 @@ input:not([type="checkbox"]):not([type="range"]):focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 16%, transparent);
+  box-shadow: var(--focus-ring);
+}
+
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.panel-surface {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--teal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
 ::selection {
@@ -152,6 +201,11 @@ select:focus-visible {
   margin: 0.45em 0;
 }
 
+.markdown-body {
+  max-width: 76ch;
+  overflow-wrap: anywhere;
+}
+
 .markdown-body pre {
   background: var(--editor-bg);
   border: 1px solid var(--line);
@@ -159,6 +213,19 @@ select:focus-visible {
   padding: 10px 12px;
   overflow: auto;
   font-size: 13px;
+}
+
+textarea {
+  line-height: 1.45;
+}
+
+.welcome-grid {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: center;
+  mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
 }
 
 .markdown-body code {
